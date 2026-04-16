@@ -1,0 +1,209 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String         @id @default(uuid())
+  name          String
+  email         String         @unique
+  password      String
+  role          Role
+  managerId     String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  activityLogs  ActivityLog[]
+  comments      Comment[]
+  notifications Notification[]
+  assignedTasks Task[]         @relation("TaskAssignedTo")
+  manager       User?          @relation("ManagerToEmployees", fields: [managerId], references: [id])
+  employees     User[]         @relation("ManagerToEmployees")
+
+  @@map("users")
+}
+
+model Department {
+  id        String     @id @default(uuid())
+  name      String     @unique
+  createdAt DateTime   @default(now())
+  leads     Lead[]
+  taskTypes TaskType[]
+  tasks     Task[]
+
+  @@map("departments")
+}
+
+model TaskType {
+  id           String       @id @default(uuid())
+  name         String
+  departmentId String
+  createdAt    DateTime     @default(now())
+  leads        Lead[]
+  sopTemplate  SOPTemplate?
+  department   Department   @relation(fields: [departmentId], references: [id])
+  tasks        Task[]
+
+  @@map("task_types")
+}
+
+model SourceOfLead {
+  id    String @id @default(uuid())
+  name  String @unique
+  leads Lead[]
+
+  @@map("sources_of_lead")
+}
+
+model Lead {
+  id            String       @id @default(uuid())
+  leadNo        String       @unique
+  date          DateTime
+  sourceId      String
+  leadName      String
+  contactName   String?
+  contactNumber String?
+  email         String?
+  departmentId  String
+  taskTypeId    String
+  remarks       String?
+  status        LeadStatus   @default(NEW)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  department    Department   @relation(fields: [departmentId], references: [id])
+  source        SourceOfLead @relation(fields: [sourceId], references: [id])
+  taskType      TaskType     @relation(fields: [taskTypeId], references: [id])
+  tasks         Task[]
+
+  @@map("leads")
+}
+
+model Task {
+  id             String        @id @default(uuid())
+  taskNo         String        @unique
+  leadId         String
+  departmentId   String
+  taskTypeId     String
+  remarks        String?
+  contactName    String?
+  contactNumber  String?
+  email          String?
+  assignedToId   String
+  status         TaskStatus    @default(NOT_YET_STARTED)
+  priority       Priority      @default(REGULAR)
+  startDate      DateTime?
+  completionDate DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  activityLogs   ActivityLog[]
+  comments       Comment[]
+  sopSteps       TaskSOPStep[]
+  assignedTo     User          @relation("TaskAssignedTo", fields: [assignedToId], references: [id])
+  department     Department    @relation(fields: [departmentId], references: [id])
+  lead           Lead          @relation(fields: [leadId], references: [id])
+  taskType       TaskType      @relation(fields: [taskTypeId], references: [id])
+
+  @@map("tasks")
+}
+
+model SOPTemplate {
+  id         String    @id @default(uuid())
+  taskTypeId String    @unique
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  steps      SOPStep[]
+  taskType   TaskType  @relation(fields: [taskTypeId], references: [id])
+
+  @@map("sop_templates")
+}
+
+model SOPStep {
+  id         String      @id @default(uuid())
+  title      String
+  order      Int
+  templateId String
+  template   SOPTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@map("sop_steps")
+}
+
+model TaskSOPStep {
+  id          String    @id @default(uuid())
+  taskId      String
+  title       String
+  order       Int
+  isCompleted Boolean   @default(false)
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  task        Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@map("task_sop_steps")
+}
+
+model ActivityLog {
+  id        String   @id @default(uuid())
+  userId    String
+  taskId    String?
+  action    String
+  message   String?
+  createdAt DateTime @default(now())
+  task      Task?    @relation(fields: [taskId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@map("activity_logs")
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  content   String
+  userId    String
+  taskId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@map("comments")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  type      String?
+  link      String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@map("notifications")
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  EMPLOYEE
+}
+
+enum LeadStatus {
+  NEW
+  CONVERTED
+}
+
+enum TaskStatus {
+  NOT_YET_STARTED
+  DATA_NOT_RECEIVED
+  WORK_IN_PROGRESS
+  PENDING_FOR_APPROVAL
+  COMPLETED
+}
+
+enum Priority {
+  REGULAR
+  IMPORTANT
+  URGENT
+}
