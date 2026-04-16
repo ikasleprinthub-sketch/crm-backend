@@ -1,8 +1,9 @@
 import * as authService from "./auth.service";
+import * as usersService from "../users/users.service";
 
 export const register = async (req: any, res: any) => {
   try {
-    const user = await authService.registerUser(req.body);
+    const user = await usersService.createUser(req.body, req.user);
     res.json({ success: true, data: user });
   } catch (err: any) {
     res.status(400).json({ success: false, message: err.message });

@@ -14,6 +14,9 @@ model User {
   password      String
   role          Role
   managerId     String?
+  status        UserStatus     @default(ACTIVE)
+  requestedById String?
+  approvedById  String?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   activityLogs  ActivityLog[]
@@ -22,6 +25,11 @@ model User {
   assignedTasks Task[]         @relation("TaskAssignedTo")
   manager       User?          @relation("ManagerToEmployees", fields: [managerId], references: [id])
   employees     User[]         @relation("ManagerToEmployees")
+  
+  requestedBy   User?          @relation("RequesterToUsers", fields: [requestedById], references: [id])
+  requestedUsers User[]        @relation("RequesterToUsers")
+  approvedBy    User?          @relation("ApproverToUsers", fields: [approvedById], references: [id])
+  approvedUsers User[]         @relation("ApproverToUsers")
 
   @@map("users")
 }
@@ -184,9 +192,16 @@ model Notification {
 }
 
 enum Role {
+  SUPER_ADMIN
   ADMIN
   MANAGER
   EMPLOYEE
+}
+
+enum UserStatus {
+  ACTIVE
+  PENDING
+  REJECTED
 }
 
 enum LeadStatus {

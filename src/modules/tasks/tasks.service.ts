@@ -92,14 +92,14 @@ export async function getAllTasks(
             { assignedTo: { managerId: actor.id } },
           ],
         }
-      : {}; // ADMIN sees all
+      : {}; // SUPER_ADMIN sees all
 
   const where = {
     ...roleFilter,
     ...(status       ? { status }       : {}),
     ...(priority     ? { priority }     : {}),
     ...(departmentId ? { departmentId } : {}),
-    ...(assignedToId && actor.role === Role.ADMIN ? { assignedToId } : {}),
+    ...(assignedToId && actor.role === Role.SUPER_ADMIN ? { assignedToId } : {}),
     ...(search
       ? {
           OR: [
@@ -284,7 +284,7 @@ export async function getTaskActivity(taskId: string, actor: { id: string; role:
 }
 // ─── DELETE task ──────────────────────────────────────────────────────────────
 export async function deleteTask(id: string, actor: { id: string; role: string }) {
-  if (actor.role !== Role.ADMIN) {
+  if (actor.role !== Role.SUPER_ADMIN) {
     throw new AppError('Only administrators can delete tasks', 403);
   }
   await getTaskById(id, actor);

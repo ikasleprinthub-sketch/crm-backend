@@ -5,8 +5,8 @@ import { allowRoles } from "../../middleware/role.middleware";
 
 const router: any = Router();
 
-// Admin creates users
-router.post("/register", protect, allowRoles("ADMIN"), controller.register);
+// Admin/Manager creates users
+router.post("/register", protect, allowRoles("SUPER_ADMIN", "ADMIN", "MANAGER"), controller.register);
 
 // Login
 router.post("/login", controller.login);

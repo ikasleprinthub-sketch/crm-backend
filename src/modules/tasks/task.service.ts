@@ -44,7 +44,7 @@ export const createTask = async (data: any, user: any) => {
 
 // GET TASKS (ROLE BASED)
 export const getTasks = async (user: any) => {
-  if (user.role === "ADMIN") {
+  if (user.role === "SUPER_ADMIN") {
     return prisma.task.findMany({
       include: { assignedTo: true, lead: true },
     });
@@ -85,7 +85,7 @@ export const updateTaskStatus = async (taskId: string, status: any, user: any) =
     }
 
     // Manager approval
-    if (user.role !== "MANAGER" && user.role !== "ADMIN") {
+    if (user.role !== "MANAGER" && user.role !== "SUPER_ADMIN") {
       throw new Error("Only manager/admin can complete");
     }
   }

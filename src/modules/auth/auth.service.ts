@@ -2,27 +2,6 @@ import { prisma } from "../../lib/prisma";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
-// REGISTER USER (ADMIN ONLY)
-export const registerUser = async (data: any) => {
-  const existing = await prisma.user.findUnique({
-    where: { email: data.email },
-  });
-
-  if (existing) throw new Error("User already exists");
-
-  const hashedPassword = await bcrypt.hash(data.password, 10);
-
-  return prisma.user.create({
-    data: {
-      name: data.name,
-      email: data.email,
-      password: hashedPassword,
-      role: data.role,
-      managerId: data.managerId || null,
-    },
-  });
-};
-
 // LOGIN USER
 export const loginUser = async (data: any) => {
   const user = await prisma.user.findUnique({

@@ -48,8 +48,8 @@ export async function deleteComment(id: string, userId: string, role: string) {
   const comment = await prisma.comment.findUnique({ where: { id } });
   if (!comment) throw new AppError('Comment not found', 404);
 
-  // Author or Admin can delete
-  if (comment.userId !== userId && role !== 'ADMIN') {
+  // Author or Super Admin can delete
+  if (comment.userId !== userId && role !== 'SUPER_ADMIN') {
     throw new AppError('Not authorized to delete this comment', 403);
   }
 

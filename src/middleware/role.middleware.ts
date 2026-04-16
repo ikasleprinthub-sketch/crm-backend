@@ -7,5 +7,5 @@ export const allowRoles = (...roles: string[]) => {
   };
 };
 
-export const requireAdmin = allowRoles('ADMIN');
-export const requireManager = allowRoles('ADMIN', 'MANAGER');
+export const requireAdmin = allowRoles('SUPER_ADMIN', 'ADMIN');
+export const requireManager = allowRoles('SUPER_ADMIN', 'ADMIN', 'MANAGER');

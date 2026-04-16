@@ -30,12 +30,23 @@ async function main() {
   const employeePass = await bcrypt.hash('employee123', 12);
 
   // ─── USERS ──────────────────────────────────────────────────────────────────
-  const admin = await prisma.user.create({
+  const superAdmin = await prisma.user.create({
     data: {
       name: 'Super Admin',
+      email: 'superadmin@crm.com',
+      password: adminPass,
+      role: 'SUPER_ADMIN' as any,
+      status: 'ACTIVE' as any,
+    },
+  });
+
+  const admin = await prisma.user.create({
+    data: {
+      name: 'System Admin',
       email: 'admin@crm.com',
       password: adminPass,
-      role: Role.ADMIN,
+      role: 'ADMIN' as any,
+      status: 'ACTIVE' as any,
     },
   });
 
@@ -44,7 +55,8 @@ async function main() {
       name: 'Team Lead / Manager',
       email: 'manager@crm.com',
       password: managerPass,
-      role: Role.MANAGER,
+      role: 'MANAGER' as any,
+      status: 'ACTIVE' as any,
     },
   });
 
@@ -53,11 +65,12 @@ async function main() {
       name: 'Employee User',
       email: 'employee@crm.com',
       password: employeePass,
-      role: Role.EMPLOYEE,
+      role: 'EMPLOYEE' as any,
+      status: 'ACTIVE' as any,
       managerId: manager.id,
     },
   });
-  console.log('✅ Users prepared (Pass: admin123, manager123, employee123)');
+  console.log('✅ 4 Users prepared: superadmin@crm.com, admin@crm.com, manager@crm.com, employee@crm.com');
 
   // ─── DEPARTMENTS (Major Heads) ───────────────────────────────────────────────
   const departmentsData = [
