@@ -207,6 +207,11 @@ enum UserStatus {
 enum LeadStatus {
   NEW
   CONVERTED
+  HOLD_BY_LEAD
+  NOT_RESPONDED
+  DROPPED
+  AWAITING_CONFIRMATION
+  MEETING_SCHEDULED
 }
 
 enum TaskStatus {
