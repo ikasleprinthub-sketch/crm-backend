@@ -22,7 +22,7 @@ import notificationsRoutes from './modules/notifications/notifications.routes';
 
 const app = express();
 
-// ─── Security ─────────────────────────────────────────────────────────────────
+// ─── Security ───────────────────────────────────────────────────────────────── //
 app.use(helmet());
 app.use(
   cors({
