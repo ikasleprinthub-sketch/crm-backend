@@ -19,6 +19,8 @@ import sopRoutes         from './modules/sop/sop.routes';
 import activityRoutes    from './modules/activity/activity.routes';
 import commentsRoutes    from './modules/comments/comments.routes';
 import notificationsRoutes from './modules/notifications/notifications.routes';
+import attendanceRoutes    from './modules/attendance/attendance.routes';
+import intelligenceRoutes  from './modules/intelligence/intelligence.routes';
 
 const app = express();
 
@@ -79,6 +81,8 @@ app.use('/api/sop',         sopRoutes);
 app.use('/api/activity',    activityRoutes);
 app.use('/api/comments',    commentsRoutes);
 app.use('/api/notifications', notificationsRoutes);
+app.use('/api/attendance',   attendanceRoutes);
+app.use('/api/intelligence', intelligenceRoutes);
 
 // ─── 404 Handler ─────────────────────────────────────────────────────────────
 app.use((_req, res) => {

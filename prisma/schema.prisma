@@ -31,6 +31,9 @@ model User {
   approvedBy    User?          @relation("ApproverToUsers", fields: [approvedById], references: [id])
   approvedUsers User[]         @relation("ApproverToUsers")
 
+  attendance          Attendance[] @relation("UserAttendance")
+  permissionsApproved Attendance[] @relation("PermissionApprover")
+
   @@map("users")
 }
 
@@ -226,4 +229,51 @@ enum Priority {
   REGULAR
   IMPORTANT
   URGENT
+}
+
+model Attendance {
+  id                     String           @id @default(uuid())
+  userId                 String
+  date                   DateTime         @db.Date
+  status                 AttendanceStatus @default(NOT_MARKED)
+  checkIn                DateTime?
+  checkOut               DateTime?
+  totalHours             Float?
+  morningPlan            String?
+  dayCompletion          String?
+  permission             PermissionStatus @default(NONE)
+  permissionType         PermissionType?
+  permissionReason       String?
+  permissionApprovedById String?
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+
+  user                 User  @relation("UserAttendance", fields: [userId], references: [id])
+  permissionApprovedBy User? @relation("PermissionApprover", fields: [permissionApprovedById], references: [id])
+
+  @@unique([userId, date])
+  @@map("attendance")
+}
+
+enum AttendanceStatus {
+  NOT_MARKED
+  PRESENT
+  ABSENT
+  LATE
+  HALF_DAY
+  LEAVE
+  SUNDAY
+}
+
+enum PermissionStatus {
+  NONE
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PermissionType {
+  HALF_DAY
+  LEAVE
+  LATE_PERMISSION
 }
