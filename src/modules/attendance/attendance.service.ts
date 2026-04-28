@@ -236,10 +236,13 @@ export async function adminOverride(
   if (data.checkIn !== undefined) update.checkIn = data.checkIn ? new Date(data.checkIn) : null;
   if (data.checkOut !== undefined) update.checkOut = data.checkOut ? new Date(data.checkOut) : null;
 
-  const ci = (update.checkIn as Date | null) ?? record.checkIn;
-  const co = (update.checkOut as Date | null) ?? record.checkOut;
+  const ci = update.hasOwnProperty('checkIn') ? (update.checkIn as Date | null) : record.checkIn;
+  const co = update.hasOwnProperty('checkOut') ? (update.checkOut as Date | null) : record.checkOut;
+  
   if (ci && co) {
     update.totalHours = parseFloat(((co.getTime() - ci.getTime()) / 3_600_000).toFixed(2));
+  } else {
+    update.totalHours = null;
   }
 
   return prisma.attendance.update({ where: { id }, data: update });
