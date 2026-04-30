@@ -19,6 +19,7 @@ export const initSocket = (server: HttpServer) => {
 
     // Join a room based on userId for targeted notifications
     socket.on('join', (userId: string) => {
+      console.log(`👤 [Socket] User ${userId} is joining their notification room`);
       socket.join(userId);
       logger.info(`👤 User ${userId} joined their notification room`);
     });
@@ -43,7 +44,10 @@ export const getIO = () => {
  */
 export const emitNotification = (userId: string, data: any) => {
   if (io) {
+    console.log(`📡 [Socket] Emitting notification to user ${userId}:`, data.title);
     io.to(userId).emit('notification', data);
     logger.info(`🔔 Notification emitted to user ${userId}`);
+  } else {
+    console.warn(`⚠️ [Socket] IO not initialized, cannot emit to user ${userId}`);
   }
 };

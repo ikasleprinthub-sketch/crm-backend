@@ -135,16 +135,45 @@ export async function applyPermission(
     update: { permission: 'PENDING', permissionType, permissionReason: reason },
   });
 
-  // Notify manager
+  // Notify manager and Superadmins
   const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (user?.managerId) {
-    await createNotification({
-      userId:  user.managerId,
-      title:   'New Permission Request',
-      message: `${user.name} has requested a ${permissionType.replace('_', ' ')} for ${target.toDateString()}`,
-      type:    'PERMISSION_REQUEST',
-      link:    '/attendance/permissions',
+  if (user) {
+    const recipients = new Set<string>();
+    
+    // 1. Add direct manager if exists
+    if (user.managerId) recipients.add(user.managerId);
+    
+    // 2. Add all Superadmins and Admins (Leads)
+    const admins = await prisma.user.findMany({
+      where: { 
+        role: { in: ['SUPER_ADMIN', 'ADMIN'] },
+        status: 'ACTIVE' 
+      },
+      select: { id: true }
     });
+    admins.forEach(a => recipients.add(a.id));
+
+    // Notify the employee (requester)
+    await createNotification({
+      userId:  userId,
+      title:   'Request Submitted',
+      message: `Your request for ${permissionType.replace(/_/g, ' ')} on ${target.toDateString()} has been sent for approval.`,
+      type:    'PERMISSION_SENT',
+      link:    '/attendance',
+    });
+
+    // Send notifications to all recipients except the requester themselves
+    for (const recipientId of recipients) {
+      if (recipientId === userId) continue;
+      
+      await createNotification({
+        userId:  recipientId,
+        title:   'Approval Required',
+        message: `${user.name} has requested a ${permissionType.replace(/_/g, ' ')} for ${target.toDateString()}. Please review and approve.`,
+        type:    'PERMISSION_REQUEST',
+        link:    '/attendance/permissions',
+      });
+    }
   }
 
   return record;
@@ -161,6 +190,20 @@ export async function getPendingPermissions(requesterId: string, requesterRole: 
     });
   }
 
+  // Admins can see all but they shouldn't approve other Admins (per user request)
+  // So for Admin role, we filter out other Admins
+  if (requesterRole === 'ADMIN') {
+    return prisma.attendance.findMany({
+      where: { 
+        permission: 'PENDING',
+        user: { role: { in: ['MANAGER', 'EMPLOYEE'] } }
+      },
+      include: { user: { select: { id: true, name: true, email: true, role: true } } },
+      orderBy: { date: 'desc' },
+    });
+  }
+
+  // Super Admin sees everything
   return prisma.attendance.findMany({
     where: { permission: 'PENDING' },
     include: { user: { select: { id: true, name: true, email: true, role: true } } },
@@ -169,9 +212,21 @@ export async function getPendingPermissions(requesterId: string, requesterRole: 
 }
 
 export async function approvePermission(id: string, approverId: string) {
-  const record = await prisma.attendance.findUnique({ where: { id } });
+  const record = await prisma.attendance.findUnique({ 
+    where: { id },
+    include: { user: { select: { role: true } } }
+  });
   if (!record) throw new AppError('Record not found', 404);
   if (record.permission !== 'PENDING') throw new AppError('Permission is not pending', 400);
+
+  // Check if approver is allowed
+  const approver = await prisma.user.findUnique({ where: { id: approverId } });
+  if (!approver) throw new AppError('Approver not found', 404);
+
+  // Rule: Admin requests can only be approved by Super Admin
+  if (record.user.role === 'ADMIN' && approver.role !== 'SUPER_ADMIN') {
+    throw new AppError('Only Super Admins can approve Admin leave requests', 403);
+  }
 
   let status: AttendanceStatus = record.status;
   if (record.permissionType === 'HALF_DAY') status = 'HALF_DAY';
@@ -199,9 +254,21 @@ export async function approvePermission(id: string, approverId: string) {
 }
 
 export async function rejectPermission(id: string, approverId: string) {
-  const record = await prisma.attendance.findUnique({ where: { id } });
+  const record = await prisma.attendance.findUnique({ 
+    where: { id },
+    include: { user: { select: { role: true } } }
+  });
   if (!record) throw new AppError('Record not found', 404);
   if (record.permission !== 'PENDING') throw new AppError('Permission is not pending', 400);
+
+  // Check if approver is allowed
+  const approver = await prisma.user.findUnique({ where: { id: approverId } });
+  if (!approver) throw new AppError('Approver not found', 404);
+
+  // Rule: Admin requests can only be rejected by Super Admin
+  if (record.user.role === 'ADMIN' && approver.role !== 'SUPER_ADMIN') {
+    throw new AppError('Only Super Admins can reject Admin leave requests', 403);
+  }
 
   const updated = await prisma.attendance.update({
     where: { id },
