@@ -1,6 +1,7 @@
 import { AttendanceStatus, PermissionStatus, PermissionType } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { AppError } from '../../middleware/error.middleware';
+import { createNotification } from '../notifications/notifications.service';
 
 function getTodayDate(): Date {
   const d = new Date();
@@ -121,7 +122,7 @@ export async function applyPermission(
   const target = dateStr ? new Date(dateStr) : new Date();
   target.setHours(0, 0, 0, 0);
 
-  return prisma.attendance.upsert({
+  const record = await prisma.attendance.upsert({
     where: { userId_date: { userId, date: target } },
     create: {
       userId,
@@ -133,6 +134,20 @@ export async function applyPermission(
     },
     update: { permission: 'PENDING', permissionType, permissionReason: reason },
   });
+
+  // Notify manager
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (user?.managerId) {
+    await createNotification({
+      userId:  user.managerId,
+      title:   'New Permission Request',
+      message: `${user.name} has requested a ${permissionType.replace('_', ' ')} for ${target.toDateString()}`,
+      type:    'PERMISSION_REQUEST',
+      link:    '/attendance/permissions',
+    });
+  }
+
+  return record;
 }
 
 export async function getPendingPermissions(requesterId: string, requesterRole: string) {
@@ -163,10 +178,24 @@ export async function approvePermission(id: string, approverId: string) {
   else if (record.permissionType === 'LEAVE') status = 'LEAVE';
   else if (record.permissionType === 'LATE_PERMISSION' && status === 'LATE') status = 'PRESENT';
 
-  return prisma.attendance.update({
+  const updated = await prisma.attendance.update({
     where: { id },
     data: { permission: 'APPROVED', permissionApprovedById: approverId, status },
   });
+
+  // Notify employee
+  const typeStr = (record.permissionType || 'permission').replace('_', ' ').toLowerCase();
+  const dateStr = record.date instanceof Date ? record.date.toDateString() : new Date(record.date).toDateString();
+
+  await createNotification({
+    userId:  record.userId,
+    title:   'Permission Approved',
+    message: `Your request for ${typeStr} on ${dateStr} has been approved.`,
+    type:    'PERMISSION_APPROVED',
+    link:    '/attendance',
+  });
+
+  return updated;
 }
 
 export async function rejectPermission(id: string, approverId: string) {
@@ -174,10 +203,24 @@ export async function rejectPermission(id: string, approverId: string) {
   if (!record) throw new AppError('Record not found', 404);
   if (record.permission !== 'PENDING') throw new AppError('Permission is not pending', 400);
 
-  return prisma.attendance.update({
+  const updated = await prisma.attendance.update({
     where: { id },
     data: { permission: 'REJECTED', permissionApprovedById: approverId },
   });
+
+  // Notify employee
+  const typeStr = (record.permissionType || 'permission').replace('_', ' ').toLowerCase();
+  const dateStr = record.date instanceof Date ? record.date.toDateString() : new Date(record.date).toDateString();
+
+  await createNotification({
+    userId:  record.userId,
+    title:   'Permission Rejected',
+    message: `Your request for ${typeStr} on ${dateStr} has been rejected.`,
+    type:    'PERMISSION_REJECTED',
+    link:    '/attendance',
+  });
+
+  return updated;
 }
 
 export async function getTeamAttendance(managerId: string, dateStr?: string) {

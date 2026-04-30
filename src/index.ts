@@ -15,6 +15,10 @@ async function bootstrap() {
       logger.info(`📝 Environment: ${env.NODE_ENV}`);
     });
 
+    // Initialize Socket.io
+    const { initSocket } = await import('./lib/socket');
+    initSocket(server);
+
     // ─── Graceful Shutdown ────────────────────────────────────────────────────
     const shutdown = async (signal: string) => {
       logger.info(`${signal} received — shutting down gracefully`);

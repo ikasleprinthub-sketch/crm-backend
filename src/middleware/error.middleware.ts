@@ -22,6 +22,15 @@ export function errorHandler(
     return;
   }
 
+  // ─── Prisma Validation Errors ─────────────────────────────────────────────
+  if (err instanceof Prisma.PrismaClientValidationError) {
+    res.status(400).json({
+      success: false,
+      message: 'Invalid request data',
+    });
+    return;
+  }
+
   // ─── Prisma Known Request Errors ──────────────────────────────────────────
   if (err instanceof Prisma.PrismaClientKnownRequestError) {
     if (err.code === 'P2002') {

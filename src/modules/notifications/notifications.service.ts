@@ -8,7 +8,17 @@ export async function createNotification(data: {
   type?: string;
   link?: string;
 }) {
-  return prisma.notification.create({ data });
+  const notification = await prisma.notification.create({ data });
+
+  // 🔥 Real-time Notification via WebSocket
+  try {
+    const { emitNotification } = await import('../../lib/socket');
+    emitNotification(data.userId, notification);
+  } catch (err) {
+    console.error('Failed to emit socket notification:', err);
+  }
+
+  return notification;
 }
 
 export async function getMyNotifications(userId: string) {

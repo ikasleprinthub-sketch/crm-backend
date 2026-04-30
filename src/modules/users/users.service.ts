@@ -2,6 +2,7 @@ import { prisma } from '../../lib/prisma';
 import { AppError } from '../../middleware/error.middleware';
 import { Role } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { createNotification } from '../notifications/notifications.service';
 
 // ─── Shared select (never expose password) ────────────────────────────────────
 const safeSelect = {
@@ -140,7 +141,7 @@ export async function approveUser(id: string, actor: { id: string; role: string 
   if (!target) throw new AppError('User not found', 404);
   if (target.status !== 'PENDING') throw new AppError('User is not pending approval', 400);
 
-  return prisma.user.update({
+  const updated = await prisma.user.update({
     where: { id },
     data: { 
       status: 'ACTIVE' as any,
@@ -148,6 +149,19 @@ export async function approveUser(id: string, actor: { id: string; role: string 
     },
     select: safeSelect
   });
+
+  // Notify requester
+  if (target.requestedById) {
+    await createNotification({
+      userId:  target.requestedById,
+      title:   'User Account Approved',
+      message: `The account for ${target.name} has been approved.`,
+      type:    'USER_APPROVED',
+      link:    '/users',
+    });
+  }
+
+  return updated;
 }
 
 export async function rejectUser(id: string, actor: { id: string; role: string }) {
@@ -159,11 +173,24 @@ export async function rejectUser(id: string, actor: { id: string; role: string }
   if (!target) throw new AppError('User not found', 404);
   if (target.status !== 'PENDING') throw new AppError('User is not pending approval', 400);
 
-  return prisma.user.update({
+  const updated = await prisma.user.update({
     where: { id },
     data: { status: 'REJECTED' as any },
     select: safeSelect
   });
+
+  // Notify requester
+  if (target.requestedById) {
+    await createNotification({
+      userId:  target.requestedById,
+      title:   'User Account Rejected',
+      message: `The account for ${target.name} was rejected.`,
+      type:    'USER_REJECTED',
+      link:    '/users',
+    });
+  }
+
+  return updated;
 }
 
 // ─── UPDATE user ──────────────────────────────────────────────────────────────

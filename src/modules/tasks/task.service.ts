@@ -92,7 +92,6 @@ export const getTasks = async (user: any) => {
     });
   }
 
-  // ✅ ADD THIS LINE
   return [];
 };
 
