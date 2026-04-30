@@ -66,6 +66,8 @@ export const getTasks = async (user: any) => {
       where: { assignedToId: user.id },
     });
   }
+
+  return [];
 };
 
 // UPDATE TASK STATUS

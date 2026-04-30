@@ -2,12 +2,14 @@ import { prisma } from '../../lib/prisma';
 
 // ─── GET paginated activity logs ──────────────────────────────────────────────
 export async function getActivityLogs(opts: {
-  page: number;
-  limit: number;
+  page?: number;
+  limit?: number;
   taskId?: string;
   userId?: string;
 }) {
-  const { page, limit, taskId, userId } = opts;
+  const { taskId, userId } = opts;
+  const page = opts.page || 1;
+  const limit = opts.limit || 20;
   const skip = (page - 1) * limit;
 
   const where = {

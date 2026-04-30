@@ -10,3 +10,8 @@ export async function getLogs(req: Request, res: Response): Promise<void> {
   const data = await svc.getActivityLogs({ page, limit, taskId, userId });
   res.json({ success: true, data });
 }
+
+export async function getMy(req: Request, res: Response): Promise<void> {
+  const data = await svc.getActivityLogs({ userId: req.user!.id, limit: 20 });
+  res.json({ success: true, data: data.logs });
+}

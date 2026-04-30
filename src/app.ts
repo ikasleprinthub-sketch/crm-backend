@@ -21,6 +21,7 @@ import commentsRoutes    from './modules/comments/comments.routes';
 import notificationsRoutes from './modules/notifications/notifications.routes';
 import attendanceRoutes    from './modules/attendance/attendance.routes';
 import intelligenceRoutes  from './modules/intelligence/intelligence.routes';
+import notesRoutes         from './modules/notes/notes.routes';
 
 const app = express();
 
@@ -38,7 +39,7 @@ app.use(
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200,
+  max: 1000,
   message: { success: false, message: 'Too many requests, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -50,7 +51,9 @@ const authLimiter = rateLimit({
   message: { success: false, message: 'Too many auth attempts, please try again later.' },
 });
 
-app.use(limiter);
+if (env.NODE_ENV === 'production') {
+  app.use(limiter);
+}
 
 // ─── Body Parsing ─────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
@@ -83,6 +86,7 @@ app.use('/api/comments',    commentsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/attendance',   attendanceRoutes);
 app.use('/api/intelligence', intelligenceRoutes);
+app.use('/api/notes',        notesRoutes);
 
 // ─── 404 Handler ─────────────────────────────────────────────────────────────
 app.use((_req, res) => {

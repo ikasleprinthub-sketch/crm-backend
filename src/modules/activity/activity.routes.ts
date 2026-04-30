@@ -5,8 +5,9 @@ import * as ctrl from './activity.controller';
 
 const router = Router();
 
-router.use(authenticate, requireAdmin);
+router.use(authenticate);
 
-router.get('/', ctrl.getLogs);
+router.get('/my', ctrl.getMy);
+router.get('/', requireAdmin, ctrl.getLogs);
 
 export default router;

@@ -2,13 +2,14 @@ import { prisma } from '../../lib/prisma';
 import { AppError } from '../../middleware/error.middleware';
 import { TaskStatus, Priority, Role } from '@prisma/client';
 import { createLog } from '../activity/activity.service';
+import { createNotification } from '../notifications/notifications.service';
 
 // ─── Include shape ─────────────────────────────────────────────────────────────
 const taskInclude = {
   lead:       { select: { id: true, leadNo: true, leadName: true } },
   department: { select: { id: true, name: true } },
   taskType:   { select: { id: true, name: true } },
-  assignedTo: { select: { id: true, name: true, email: true, role: true } },
+  assignedTo: { select: { id: true, name: true, email: true, role: true, managerId: true } },
   sopSteps:   { orderBy: { order: 'asc' as const } },
 } as const;
 
@@ -59,6 +60,15 @@ export async function createNewTask(data: any, actorId: string) {
 
     await prisma.taskSOPStep.createMany({ data: steps });
   }
+
+  // Notify assignee
+  await createNotification({
+    userId:  data.assignedToId,
+    title:   'New Task Assigned',
+    message: `You have been assigned task ${taskNo}`,
+    type:    'TASK_ASSIGNED',
+    link:    `/tasks/${task.id}`,
+  });
 
   // Refetch to include the newly created SOP steps
   return prisma.task.findUnique({ where: { id: task.id }, include: taskInclude });
@@ -204,6 +214,28 @@ export async function updateTask(
       action: 'STATUS_CHANGED',
       message: `Status changed to ${data.status} on task ${task.taskNo}`,
     });
+
+    // Notify assignee if someone else changed the status
+    if (updated.assignedToId !== actor.id) {
+      await createNotification({
+        userId:  updated.assignedToId,
+        title:   'Task Status Updated',
+        message: `Task ${task.taskNo} is now ${data.status}`,
+        type:    'STATUS_UPDATE',
+        link:    `/tasks/${id}`,
+      });
+    }
+
+    // If marked COMPLETED, notify the manager
+    if (data.status === TaskStatus.COMPLETED && updated.assignedTo.managerId) {
+      await createNotification({
+        userId:  updated.assignedTo.managerId,
+        title:   'Task Completed',
+        message: `${updated.assignedTo.name} completed task ${task.taskNo}`,
+        type:    'TASK_COMPLETED',
+        link:    `/tasks/${id}`,
+      });
+    }
   }
 
   return updated;
