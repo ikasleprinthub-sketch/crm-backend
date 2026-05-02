@@ -171,7 +171,7 @@ export async function applyPermission(
         title:   'Approval Required',
         message: `${user.name} has requested a ${permissionType.replace(/_/g, ' ')} for ${target.toDateString()}. Please review and approve.`,
         type:    'PERMISSION_REQUEST',
-        link:    '/attendance/permissions',
+        link:    '/attendance?tab=permissions',
       });
     }
   }
