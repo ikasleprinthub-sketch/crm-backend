@@ -196,17 +196,18 @@ export async function rejectUser(id: string, actor: { id: string; role: string }
 // ─── UPDATE user ──────────────────────────────────────────────────────────────
 export async function updateUser(
   id: string,
-  data: Partial<{ name: string; email: string; password: string; role: Role; managerId: string | null }>,
+  data: Partial<{ name: string; email: string; password: string; role: Role; managerId: string | null; currentPassword?: string; newPassword?: string }>,
   actor: { id: string; role: string }
 ) {
+  const existing = await prisma.user.findUnique({ where: { id } });
+  if (!existing) throw new AppError('User not found', 404);
+
   // Permission check for UPDATE
   if (actor.role === 'SUPER_ADMIN') {
     // Super admin can update anyone
   } else if (actor.role === 'ADMIN') {
     // Admin can update themselves, Managers, or Employees
-    const target = await prisma.user.findUnique({ where: { id } });
-    if (!target) throw new AppError('User not found', 404);
-    if (target.role === 'SUPER_ADMIN' && actor.id !== id) {
+    if (existing.role === 'SUPER_ADMIN' && actor.id !== id) {
        throw new AppError('Admins cannot update Super Admin accounts', 403);
     }
   } else if (actor.id !== id) {
@@ -214,23 +215,48 @@ export async function updateUser(
   }
 
   // Role change restrictions
-  if (data.role && actor.role !== 'SUPER_ADMIN' && actor.role !== 'ADMIN') {
+  if (data.role && data.role !== existing.role && actor.role !== 'SUPER_ADMIN' && actor.role !== 'ADMIN') {
     throw new AppError('Only administrators can change account roles', 403);
   }
 
-  const existing = await prisma.user.findUnique({ where: { id } });
-  if (!existing) throw new AppError('User not found', 404);
-
-  const updateData: Record<string, unknown> = {};
+  const updateData: Record<string, any> = {};
   if (data.name)      updateData.name      = data.name;
   if (data.email)     updateData.email     = data.email;
   if (data.role)      updateData.role      = data.role;
   if (data.managerId !== undefined) updateData.managerId = data.managerId;
-  if (data.password) {
-    updateData.password = await bcrypt.hash(data.password, 12);
+  
+  // Handle Password Updates
+  const newPass = data.newPassword || data.password;
+
+  if (newPass) {
+    console.log(`[UsersService] Password update requested for user ${id}`);
+    if (newPass.length < 6) {
+      throw new AppError('Password must be at least 6 characters.', 400);
+    }
+
+    // Security Check: If updating own password, current password is required
+    if (actor.id === id) {
+      if (!data.currentPassword) {
+        throw new AppError('Current password is required to set a new password.', 400);
+      }
+      const isMatch = await bcrypt.compare(data.currentPassword, existing.password);
+      if (!isMatch) {
+        console.log(`[UsersService] Current password mismatch for user ${id}`);
+        throw new AppError('Current password incorrect. Please verify and try again.', 400);
+      }
+    }
+    
+    // Hash and update the password
+    const hashed = await bcrypt.hash(newPass, 12);
+    updateData.password = hashed;
+    console.log(`[UsersService] Password hashed and added to updateData for user ${id}`);
   }
 
-  return prisma.user.update({ where: { id }, data: updateData, select: safeSelect });
+  return prisma.user.update({
+    where: { id },
+    data: updateData,
+    select: safeSelect
+  });
 }
 
 // ─── ASSIGN employee to manager (Admin only) ──────────────────────────────────

@@ -1,4 +1,4 @@
-import './config/env'; // Validate env vars first — fail fast  //hi
+import './config/env'; // Validate env vars first — fail fast (Restarted: 2026-05-02 18:50)
 import app from './app';
 import { env } from './config/env';
 import { logger } from './config/logger';
