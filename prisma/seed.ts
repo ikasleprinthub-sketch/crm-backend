@@ -5,7 +5,7 @@ const prisma = new PrismaClient();
 
 async function main() {
   console.log('🧹 Clearing existing data for a clean start...');
-  
+
   // Delete in order to avoid foreign key violations
   await prisma.activityLog.deleteMany();
   await prisma.comment.deleteMany();
@@ -19,7 +19,7 @@ async function main() {
   await prisma.department.deleteMany();
   await prisma.sourceOfLead.deleteMany();
   await prisma.user.deleteMany();
-  
+
   console.log('✨ Database cleared.\n');
 
   console.log('🌱 Starting database seed with Excel data...\n');
@@ -53,7 +53,7 @@ async function main() {
   const manager = await prisma.user.create({
     data: {
       name: 'Team Lead / Manager',
-      email: 'mr@crm.comanage',
+      email: 'manager@crm.com',
       password: managerPass,
       role: 'MANAGER' as any,
       status: 'ACTIVE' as any,
