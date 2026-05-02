@@ -19,7 +19,7 @@ async function bootstrap() {
     const { initSocket } = await import('./lib/socket');
     initSocket(server);
 
-    // ─── Graceful Shutdown ────────────────────────────────────────────────────
+    // ─── Graceful Shutdown ──────────────────────────────────────────────────── //
     const shutdown = async (signal: string) => {
       logger.info(`${signal} received — shutting down gracefully`);
       server.close(async () => {
