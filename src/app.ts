@@ -26,10 +26,15 @@ import notesRoutes         from './modules/notes/notes.routes';
 const app = express();
 
 // ─── Security ───────────────────────────────────────────────────────────────── //
-app.use(helmet());
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    crossOriginOpenerPolicy: { policy: 'unsafe-none' },
+  })
+);
 app.use(
   cors({
-    origin: env.CORS_ORIGIN,
+    origin: env.NODE_ENV === 'development' ? true : env.CORS_ORIGIN,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],

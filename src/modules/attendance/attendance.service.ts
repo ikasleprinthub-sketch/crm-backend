@@ -122,6 +122,13 @@ export async function applyPermission(
   const target = dateStr ? new Date(dateStr) : new Date();
   target.setHours(0, 0, 0, 0);
 
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  if (target < today) {
+    throw new AppError('Cannot apply for permission on a past date.', 400);
+  }
+
   const record = await prisma.attendance.upsert({
     where: { userId_date: { userId, date: target } },
     create: {
@@ -171,7 +178,7 @@ export async function applyPermission(
         title:   'Approval Required',
         message: `${user.name} has requested a ${permissionType.replace(/_/g, ' ')} for ${target.toDateString()}. Please review and approve.`,
         type:    'PERMISSION_REQUEST',
-        link:    '/attendance/permissions',
+        link:    '/attendance?tab=permissions',
       });
     }
   }
