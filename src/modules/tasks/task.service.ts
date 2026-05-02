@@ -43,6 +43,31 @@ export const createTask = async (data: any, user: any) => {
 };
 
 // GET TASKS (ROLE BASED)
+// export const getTasks = async (user: any) => {
+//   if (user.role === "SUPER_ADMIN") {
+//     return prisma.task.findMany({
+//       include: { assignedTo: true, lead: true },
+//     });
+//   }
+
+//   if (user.role === "MANAGER") {
+//     return prisma.task.findMany({
+//       where: {
+//         assignedTo: {
+//           managerId: user.id,
+//         },
+//       },
+//       include: { assignedTo: true },
+//     });
+//   }
+
+//   if (user.role === "EMPLOYEE") {
+//     return prisma.task.findMany({
+//       where: { assignedToId: user.id },
+//     });
+//   }
+// };
+
 export const getTasks = async (user: any) => {
   if (user.role === "SUPER_ADMIN") {
     return prisma.task.findMany({
