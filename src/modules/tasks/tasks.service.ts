@@ -215,10 +215,14 @@ export async function updateTask(
       message: `Status changed to ${data.status} on task ${task.taskNo}`,
     });
 
-    // Notify assignee if someone else changed the status
-    if (updated.assignedToId !== actor.id) {
+    // Notification Logic
+    const assigneeId = updated.assignedToId;
+    const managerId  = updated.assignedTo.managerId;
+
+    // 1. Notify Assignee if someone else changed it
+    if (assigneeId !== actor.id) {
       await createNotification({
-        userId:  updated.assignedToId,
+        userId:  assigneeId,
         title:   'Task Status Updated',
         message: `Task ${task.taskNo} is now ${data.status}`,
         type:    'STATUS_UPDATE',
@@ -226,12 +230,49 @@ export async function updateTask(
       });
     }
 
-    // If marked COMPLETED, notify the manager
-    if (data.status === TaskStatus.COMPLETED && updated.assignedTo.managerId) {
+    // 2. If an EMPLOYEE changed the status, notify Manager and all Admins
+    if (actor.role === Role.EMPLOYEE) {
+      const isPending = data.status === TaskStatus.PENDING_FOR_APPROVAL;
+      const title = isPending ? 'Task Awaiting Approval' : 'Team Task Updated';
+      const msg = isPending 
+        ? `${updated.assignedTo.name} has finished task ${task.taskNo} and is awaiting your approval.`
+        : `${updated.assignedTo.name} updated task ${task.taskNo} to ${data.status}`;
+
+      // Notify Manager
+      if (managerId) {
+        await createNotification({
+          userId:  managerId,
+          title,
+          message: msg,
+          type:    'TASK_UPDATE',
+          link:    `/tasks/${id}`,
+        });
+      }
+
+      // Notify all ADMINS and SUPER_ADMINS
+      const admins = await prisma.user.findMany({
+        where: { role: { in: [Role.ADMIN, Role.SUPER_ADMIN] } },
+        select: { id: true }
+      });
+
+      for (const admin of admins) {
+        if (admin.id === actor.id) continue; // Don't notify self
+        await createNotification({
+          userId:  admin.id,
+          title,
+          message: msg,
+          type:    'TASK_UPDATE',
+          link:    `/tasks/${id}`,
+        });
+      }
+    }
+
+    // 3. If a Manager/Admin marks as COMPLETED, notify the Assignee (Employee)
+    if (data.status === TaskStatus.COMPLETED && actor.role !== Role.EMPLOYEE) {
       await createNotification({
-        userId:  updated.assignedTo.managerId,
-        title:   'Task Completed',
-        message: `${updated.assignedTo.name} completed task ${task.taskNo}`,
+        userId:  assigneeId,
+        title:   'Task Approved & Completed',
+        message: `Your work on task ${task.taskNo} has been approved and marked as completed.`,
         type:    'TASK_COMPLETED',
         link:    `/tasks/${id}`,
       });
@@ -267,21 +308,12 @@ export async function completeSOPStep(
     message: `Step "${step.title}" marked complete`,
   });
 
-  // Auto-mark task COMPLETED if all steps done
+  // Auto-mark task PENDING_FOR_APPROVAL if all steps done
   const remaining = await prisma.taskSOPStep.count({
     where: { taskId, isCompleted: false },
   });
   if (remaining === 0) {
-    await prisma.task.update({
-      where: { id: taskId },
-      data: { status: TaskStatus.COMPLETED, completionDate: new Date() },
-    });
-    await createLog({
-      userId: actor.id,
-      taskId,
-      action: 'TASK_AUTO_COMPLETED',
-      message: 'All SOP steps done — task auto-marked as COMPLETED',
-    });
+    await updateTask(taskId, { status: TaskStatus.PENDING_FOR_APPROVAL }, actor);
   }
 
   return updated;
