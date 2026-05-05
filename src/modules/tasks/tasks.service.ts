@@ -50,16 +50,27 @@ export async function createNewTask(data: any, actorId: string) {
     include: { steps: true }
   });
 
-  if (template && template.steps.length > 0) {
-    const steps = template.steps.map(s => ({
+  if (!template || template.steps.length === 0) {
+    throw new AppError('No SOP steps defined for this task type. Please configure SOP steps in settings first.', 400);
+  }
+
+  const steps = template.steps.map(s => {
+    let dueAt = null;
+    if (s.deadlineHours > 0) {
+      dueAt = new Date(Date.now() + s.deadlineHours * 60 * 60 * 1000);
+    }
+    return {
       taskId: task.id,
       title:  s.title,
       order:  s.order,
-      isCompleted: false
-    }));
+      isCompleted: false,
+      assignedRole: s.assignedRole,
+      deadlineHours: s.deadlineHours,
+      dueAt
+    };
+  });
 
-    await prisma.taskSOPStep.createMany({ data: steps });
-  }
+  await prisma.taskSOPStep.createMany({ data: steps });
 
   // Notify assignee
   await createNotification({
@@ -282,10 +293,11 @@ export async function updateTask(
   return updated;
 }
 
-// ─── COMPLETE an SOP step ─────────────────────────────────────────────────────
-export async function completeSOPStep(
+// ─── TOGGLE an SOP step ──────────────────────────────────────────────────────
+export async function toggleSOPStep(
   taskId: string,
   stepId: string,
+  isCompleted: boolean,
   actor: { id: string; role: string }
 ) {
   await getTaskById(taskId, actor);
@@ -294,46 +306,100 @@ export async function completeSOPStep(
     where: { id: stepId, taskId },
   });
   if (!step) throw new AppError('SOP step not found on this task', 404);
-  if (step.isCompleted) throw new AppError('Step already completed', 400);
+
+  // 1. Role-Based Check
+  // Admins and Super Admins can toggle anything. 
+  // Managers can toggle Manager/Employee steps. 
+  // Employees can only toggle Employee steps.
+  const roleHierarchy: Record<string, number> = { 'EMPLOYEE': 1, 'MANAGER': 2, 'ADMIN': 3, 'SUPER_ADMIN': 4 };
+  const userRank = roleHierarchy[actor.role] || 0;
+  const stepRank = roleHierarchy[step.assignedRole] || 0;
+
+  if (userRank < stepRank && actor.role !== 'SUPER_ADMIN') {
+    throw new AppError(`Access Denied: This step requires ${step.assignedRole} role.`, 403);
+  }
+
+  // 2. Step Lock Logic (Sequential Execution)
+  if (isCompleted) {
+    const previousStep = await prisma.taskSOPStep.findFirst({
+      where: { 
+        taskId, 
+        order: { lt: step.order } 
+      },
+      orderBy: { order: 'desc' }
+    });
+
+    if (previousStep && !previousStep.isCompleted) {
+      throw new AppError(`Workflow Lock: Please complete the previous step "${previousStep.title}" first.`, 400);
+    }
+  } else {
+    // If unchecking, ensure no FUTURE step is already completed
+    const nextStep = await prisma.taskSOPStep.findFirst({
+      where: { 
+        taskId, 
+        order: { gt: step.order },
+        isCompleted: true
+      },
+      orderBy: { order: 'asc' }
+    });
+
+    if (nextStep) {
+      throw new AppError(`Workflow Lock: Cannot undo "${step.title}" because the next step "${nextStep.title}" is already completed.`, 400);
+    }
+  }
 
   const updated = await prisma.taskSOPStep.update({
     where: { id: stepId },
-    data: { isCompleted: true, completedAt: new Date() },
+    data: { 
+      isCompleted, 
+      completedAt: isCompleted ? new Date() : null 
+    },
   });
 
   await createLog({
     userId: actor.id,
     taskId,
-    action: 'SOP_STEP_COMPLETED',
-    message: `Step "${step.title}" marked complete`,
+    action: isCompleted ? 'SOP_STEP_COMPLETED' : 'SOP_STEP_UNDO',
+    message: `Step "${step.title}" marked ${isCompleted ? 'complete' : 'incomplete'}`,
   });
 
-  // Auto-mark task PENDING_FOR_APPROVAL if all steps done
-  const remaining = await prisma.taskSOPStep.count({
-    where: { taskId, isCompleted: false },
-  });
-  if (remaining === 0) {
+  // ─── Automated Status Transitions ──────────────────────────────────────────
+  const totalSteps = await prisma.taskSOPStep.count({ where: { taskId } });
+  const completedSteps = await prisma.taskSOPStep.count({ where: { taskId, isCompleted: true } });
+  
+  if (completedSteps === totalSteps && totalSteps > 0) {
+    // 100% Done -> Pending Approval
     await updateTask(taskId, { status: TaskStatus.PENDING_FOR_APPROVAL }, actor);
+  } else if (completedSteps > 0) {
+    // 1% - 99% Done -> In Progress
+    await updateTask(taskId, { status: TaskStatus.WORK_IN_PROGRESS }, actor);
+  } else if (completedSteps === 0 && totalSteps > 0) {
+    // 0% Done -> Not Started (if it was WIP or Pending)
+    const currentTask = await prisma.task.findUnique({ where: { id: taskId } });
+    if (currentTask?.status === TaskStatus.WORK_IN_PROGRESS || currentTask?.status === TaskStatus.PENDING_FOR_APPROVAL) {
+      await updateTask(taskId, { status: TaskStatus.NOT_YET_STARTED }, actor);
+    }
   }
 
   return updated;
 }
 
-// ─── UNDO an SOP step ─────────────────────────────────────────────────────────
+// ─── COMPLETE an SOP step (Deprecated in favor of toggle) ─────────────────────
+export async function completeSOPStep(
+  taskId: string,
+  stepId: string,
+  actor: { id: string; role: string }
+) {
+  return toggleSOPStep(taskId, stepId, true, actor);
+}
+
+// ─── UNDO an SOP step (Deprecated in favor of toggle) ─────────────────────────
 export async function undoSOPStep(
   taskId: string,
   stepId: string,
   actor: { id: string; role: string }
 ) {
-  await getTaskById(taskId, actor);
-
-  const step = await prisma.taskSOPStep.findFirst({ where: { id: stepId, taskId } });
-  if (!step) throw new AppError('SOP step not found on this task', 404);
-
-  return prisma.taskSOPStep.update({
-    where: { id: stepId },
-    data: { isCompleted: false, completedAt: null },
-  });
+  return toggleSOPStep(taskId, stepId, false, actor);
 }
 
 // ─── GET activity for a task ──────────────────────────────────────────────────

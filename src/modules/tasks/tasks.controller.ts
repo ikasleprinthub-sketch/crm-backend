@@ -33,8 +33,9 @@ export async function update(req: Request, res: Response): Promise<void> {
   res.json({ success: true, data });
 }
 
-export async function completeStep(req: Request, res: Response): Promise<void> {
-  const data = await svc.completeSOPStep(req.params.id, req.params.stepId, req.user!);
+export async function toggleStep(req: Request, res: Response): Promise<void> {
+  const { isCompleted } = req.body;
+  const data = await svc.toggleSOPStep(req.params.id, req.params.stepId, !!isCompleted, req.user!);
   res.json({ success: true, data });
 }
 

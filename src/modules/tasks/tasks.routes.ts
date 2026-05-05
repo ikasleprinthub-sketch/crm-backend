@@ -15,7 +15,7 @@ router.patch('/:id', ctrl.update);
 router.delete('/:id', requireAdmin, ctrl.remove);
 
 // SOP Steps
-router.patch('/:id/sop/:stepId', ctrl.completeStep);
+router.patch('/:id/sop/:stepId', ctrl.toggleStep);
 
 // Task activity log
 router.get('/:id/activity', ctrl.getActivity);
