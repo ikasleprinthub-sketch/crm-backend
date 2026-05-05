@@ -248,6 +248,9 @@ model Attendance {
   checkOut               DateTime?
   totalHours             Float?
   morningPlan            String?
+  afternoonPlan          String?
+  eveningPlan            String?
+  nightPlan              String?
   dayCompletion          String?
   permission             PermissionStatus @default(NONE)
   permissionType         PermissionType?
@@ -298,4 +301,14 @@ model Note {
   user      User     @relation(fields: [userId], references: [id])
 
   @@map("notes")
+}
+
+model SystemConfig {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("system_configs")
 }

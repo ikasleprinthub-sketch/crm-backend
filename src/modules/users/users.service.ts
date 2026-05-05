@@ -284,11 +284,24 @@ export async function assignToManager(employeeId: string, managerId: string | nu
 export async function deleteUser(id: string, actor: { id: string; role: string }) {
   if (id === actor.id) throw new AppError('Cannot delete yourself', 400);
   
+  const target = await prisma.user.findUnique({ 
+    where: { id },
+    include: {
+      _count: {
+        select: {
+          assignedTasks: true,
+          employees: true,
+        }
+      }
+    }
+  });
+
+  if (!target) throw new AppError('User not found', 404);
+
+  // Permission check
   if (actor.role === 'SUPER_ADMIN') {
-    // Super admin can delete anyone
+    // Super admin can delete
   } else if (actor.role === 'ADMIN') {
-    const target = await prisma.user.findUnique({ where: { id } });
-    if (!target) throw new AppError('User not found', 404);
     if (target.role === 'SUPER_ADMIN' || target.role === 'ADMIN') {
       throw new AppError('Admins cannot delete other administrators', 403);
     }
@@ -296,7 +309,31 @@ export async function deleteUser(id: string, actor: { id: string; role: string }
     throw new AppError('Only administrators can delete user accounts', 403);
   }
 
-  return prisma.user.delete({ where: { id } });
+  // Business Logic Check: Prevent deletion if user has active tasks or team members
+  if (target._count.assignedTasks > 0) {
+    throw new AppError(`Cannot delete user: ${target.name} has ${target._count.assignedTasks} assigned tasks. Please reassign them first.`, 400);
+  }
+  if (target._count.employees > 0) {
+    throw new AppError(`Cannot delete user: ${target.name} is a manager for ${target._count.employees} employees. Please reassign the team first.`, 400);
+  }
+
+  // Execute deletion in a transaction to clean up non-critical relations
+  return prisma.$transaction(async (tx) => {
+    // 1. Delete non-critical relations
+    await tx.notification.deleteMany({ where: { userId: id } });
+    await tx.activityLog.deleteMany({ where: { userId: id } });
+    await tx.note.deleteMany({ where: { userId: id } });
+    await tx.comment.deleteMany({ where: { userId: id } });
+    await tx.attendance.deleteMany({ where: { userId: id } });
+
+    // 2. Clear references in other records (nullify where possible)
+    await tx.user.updateMany({ where: { requestedById: id }, data: { requestedById: null } });
+    await tx.user.updateMany({ where: { approvedById: id }, data: { approvedById: null } });
+    await tx.attendance.updateMany({ where: { permissionApprovedById: id }, data: { permissionApprovedById: null } });
+
+    // 3. Finally delete the user
+    return tx.user.delete({ where: { id } });
+  });
 }
 
 // ─── GET team for a manager ───────────────────────────────────────────────────
