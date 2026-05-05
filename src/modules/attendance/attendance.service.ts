@@ -2,20 +2,24 @@ import { AttendanceStatus, PermissionStatus, PermissionType } from '@prisma/clie
 import { prisma } from '../../lib/prisma';
 import { AppError } from '../../middleware/error.middleware';
 import { createNotification } from '../notifications/notifications.service';
+import { getConfig } from '../config/config.service';
 
 function getTodayDate(): Date {
   const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
+  // Return a Date object at midnight UTC to be safe with @db.Date
+  return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
 }
 
 function isSunday(date: Date): boolean {
   return date.getDay() === 0;
 }
 
-function isLateCheckIn(time: Date): boolean {
+async function isLateCheckIn(time: Date): Promise<boolean> {
+  const startTimeStr = await getConfig('officeStartTime', '10:00');
+  const [h, m] = startTimeStr.split(':').map(Number);
+  
   const cutoff = new Date(time);
-  cutoff.setHours(10, 0, 0, 0);
+  cutoff.setHours(h, m, 0, 0);
   return time > cutoff;
 }
 
@@ -31,7 +35,7 @@ export async function checkIn(userId: string) {
   if (existing?.checkIn) throw new AppError('Already checked in today', 400);
 
   const now = new Date();
-  const late = isLateCheckIn(now);
+  const late = await isLateCheckIn(now);
 
   return prisma.attendance.upsert({
     where: { userId_date: { userId, date: today } },
@@ -67,30 +71,57 @@ export async function checkOut(userId: string, dayCompletion?: string) {
   });
 }
 
-export async function submitMorningPlan(userId: string, morningPlan: string) {
+export async function submitMorningPlan(userId: string, content: string) {
   const today = getTodayDate();
+  const hour = new Date().getHours();
+
+  let field: 'morningPlan' | 'afternoonPlan' | 'eveningPlan' | 'nightPlan' = 'morningPlan';
+  let planType = 'Morning';
+
+  if (hour >= 12 && hour < 17) {
+    field = 'afternoonPlan';
+    planType = 'Afternoon';
+  } else if (hour >= 17 && hour < 21) {
+    field = 'eveningPlan';
+    planType = 'Evening';
+  } else if (hour >= 21) {
+    field = 'nightPlan';
+    planType = 'Night';
+  }
 
   const record = await prisma.attendance.findUnique({
     where: { userId_date: { userId, date: today } },
   });
 
-  if (!record?.checkIn) throw new AppError('Must check in before submitting morning plan', 400);
+  if (!record?.checkIn) throw new AppError(`Must check in before submitting ${planType.toLowerCase()} plan`, 400);
+
+  // Also create a Note for this plan
+  await prisma.note.create({
+    data: {
+      userId,
+      title: `${planType} Plan — ${today.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}`,
+      content: content,
+      color: field === 'morningPlan' ? 'blue' : field === 'afternoonPlan' ? 'orange' : field === 'eveningPlan' ? 'purple' : 'gray'
+    }
+  });
 
   return prisma.attendance.update({
     where: { userId_date: { userId, date: today } },
-    data: { morningPlan },
+    data: { [field]: content },
   });
 }
 
 export async function getTodayAttendance(userId: string) {
   const today = getTodayDate();
+  console.log(`[AttendanceService] Fetching today's record for user ${userId} on ${today.toISOString()}`);
 
-  const existing = await prisma.attendance.findUnique({
-    where: { userId_date: { userId, date: today } },
+  const existing = await prisma.attendance.findFirst({
+    where: { userId, date: today },
   });
 
   if (existing) return existing;
 
+  console.log(`[AttendanceService] No record found, creating new record for user ${userId}`);
   return prisma.attendance.create({
     data: {
       userId,
@@ -120,13 +151,24 @@ export async function applyPermission(
   dateStr?: string,
 ) {
   const target = dateStr ? new Date(dateStr) : new Date();
-  target.setHours(0, 0, 0, 0);
+  target.setUTCHours(0, 0, 0, 0);
 
   const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  today.setUTCHours(0, 0, 0, 0);
 
   if (target < today) {
-    throw new AppError('Cannot apply for permission on a past date.', 400);
+    throw new AppError('Invalid Date: Permissions can only be applied for today or future dates.', 400);
+  }
+
+  // Check if a permission already exists for this date
+  const existing = await prisma.attendance.findUnique({
+    where: { userId_date: { userId, date: target } },
+  });
+
+  if (existing && (existing.permission === 'PENDING' || existing.permission === 'APPROVED')) {
+    const statusText = existing.permission.toLowerCase();
+    const typeText = existing.permissionType?.replace('_', ' ').toLowerCase() || 'attendance';
+    throw new AppError(`You already have a ${statusText} ${typeText} request for this date (${target.toLocaleDateString()}). No new request is needed.`, 400);
   }
 
   const record = await prisma.attendance.upsert({
