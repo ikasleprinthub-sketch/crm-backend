@@ -1,37 +1,16 @@
 import { Request, Response } from 'express';
 import * as svc from './sop.service';
 
-export async function getAll(_req: Request, res: Response): Promise<void> {
-  const data = await svc.getAllTemplates();
+export async function getTemplate(req: Request, res: Response) {
+  const data = await svc.getTemplateByTaskType(req.params.taskTypeId);
   res.json({ success: true, data });
 }
 
-export async function getOne(req: Request, res: Response): Promise<void> {
-  const data = await svc.getTemplateById(req.params.id);
+export async function saveTemplate(req: Request, res: Response) {
+  const { steps } = req.body;
+  if (!Array.isArray(steps)) {
+    return res.status(400).json({ success: false, message: 'Steps must be an array' });
+  }
+  const data = await svc.updateTemplateSteps(req.params.taskTypeId, steps);
   res.json({ success: true, data });
-}
-
-export async function create(req: Request, res: Response): Promise<void> {
-  const data = await svc.createTemplate(req.body);
-  res.status(201).json({ success: true, data });
-}
-
-export async function updateSteps(req: Request, res: Response): Promise<void> {
-  const data = await svc.updateTemplateSteps(req.params.id, req.body.steps);
-  res.json({ success: true, data });
-}
-
-export async function addStep(req: Request, res: Response): Promise<void> {
-  const data = await svc.addStep(req.params.id, req.body);
-  res.status(201).json({ success: true, data });
-}
-
-export async function deleteStep(req: Request, res: Response): Promise<void> {
-  await svc.deleteStep(req.params.stepId);
-  res.json({ success: true, message: 'Step deleted' });
-}
-
-export async function remove(req: Request, res: Response): Promise<void> {
-  await svc.deleteTemplate(req.params.id);
-  res.json({ success: true, message: 'SOP template deleted' });
 }
