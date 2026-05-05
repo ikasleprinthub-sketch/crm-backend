@@ -33,11 +33,19 @@ export async function createNewTask(data: any, actorId: string) {
       startDate:     data.startDate ? (() => {
         const d = new Date(data.startDate);
         if (isNaN(d.getTime())) throw new AppError('Invalid start date format', 400);
+        // Validation: Start time must be at or after 17:30
+        if (d.getHours() < 17 || (d.getHours() === 17 && d.getMinutes() < 30)) {
+          throw new AppError('Task start time must be 5:30 PM or later.', 400);
+        }
         return d;
       })() : undefined,
       completionDate:data.completionDate ? (() => {
         const d = new Date(data.completionDate);
         if (isNaN(d.getTime())) throw new AppError('Invalid completion date format', 400);
+        // Validation: Completion time must be at or after 17:30
+        if (d.getHours() < 17 || (d.getHours() === 17 && d.getMinutes() < 30)) {
+          throw new AppError('Task completion time cannot be before 5:30 PM.', 400);
+        }
         return d;
       })() : undefined,
     },
@@ -197,22 +205,28 @@ export async function updateTask(
       ? new Date(data.completionDate)
       : undefined;
 
+  // RESTRICTION: Admins/Managers cannot edit core fields once task is created.
+  // They can only change Status, Priority, and SOP Steps.
+  const isPrivileged = actor.role === Role.ADMIN || actor.role === Role.SUPER_ADMIN || actor.role === Role.MANAGER;
+  
+  if (isPrivileged) {
+    const coreFields = ['assignedToId', 'leadId', 'departmentId', 'taskTypeId', 'startDate', 'completionDate'];
+    const attemptedCoreEdits = Object.keys(data).filter(key => coreFields.includes(key));
+    
+    if (attemptedCoreEdits.length > 0) {
+      throw new AppError(`Admins/Managers cannot edit core task details (${attemptedCoreEdits.join(', ')}) after creation.`, 403);
+    }
+  }
+
   const updated = await prisma.task.update({
     where: { id },
     data: {
       ...(data.status        ? { status: data.status }               : {}),
       ...(data.priority      ? { priority: data.priority }           : {}),
-      ...(data.assignedToId  ? { assignedToId: data.assignedToId }   : {}),
       ...(data.remarks       !== undefined ? { remarks: data.remarks }           : {}),
       ...(data.contactName   !== undefined ? { contactName: data.contactName }   : {}),
       ...(data.contactNumber !== undefined ? { contactNumber: data.contactNumber } : {}),
       ...(data.email         !== undefined ? { email: data.email }               : {}),
-      ...(data.startDate     ? { startDate: (() => {
-        const d = new Date(data.startDate);
-        if (isNaN(d.getTime())) throw new AppError('Invalid start date format', 400);
-        return d;
-      })() } : {}),
-      ...(completionDate     ? { completionDate }                      : {}),
     },
     include: taskInclude,
   });
