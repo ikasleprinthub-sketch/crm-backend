@@ -3,7 +3,8 @@ import * as svc from './sop.service';
 
 export async function getTemplate(req: Request, res: Response): Promise<void> {
   const data = await svc.getTemplateByTaskType(req.params.taskTypeId);
-  return res.json({ success: true, data });
+  res.json({ success: true, data });
+  return;
 }
 
 export async function saveTemplate(req: Request, res: Response): Promise<void> {
@@ -13,5 +14,6 @@ export async function saveTemplate(req: Request, res: Response): Promise<void> {
     return;
   }
   const data = await svc.updateTemplateSteps(req.params.taskTypeId, steps);
-  return res.json({ success: true, data });
+  res.json({ success: true, data });
+  return;
 }
