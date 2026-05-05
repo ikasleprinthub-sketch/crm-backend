@@ -6,8 +6,8 @@ import { getConfig } from '../config/config.service';
 
 function getTodayDate(): Date {
   const d = new Date();
-  // Return a Date object but ensure it's at midnight UTC to be safe with @db.Date
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  // Return a Date object at midnight UTC to be safe with @db.Date
+  return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
 }
 
 function isSunday(date: Date): boolean {
@@ -151,10 +151,10 @@ export async function applyPermission(
   dateStr?: string,
 ) {
   const target = dateStr ? new Date(dateStr) : new Date();
-  target.setHours(0, 0, 0, 0);
+  target.setUTCHours(0, 0, 0, 0);
 
   const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  today.setUTCHours(0, 0, 0, 0);
 
   if (target < today) {
     throw new AppError('Invalid Date: Permissions can only be applied for today or future dates.', 400);
@@ -167,7 +167,8 @@ export async function applyPermission(
 
   if (existing && (existing.permission === 'PENDING' || existing.permission === 'APPROVED')) {
     const statusText = existing.permission.toLowerCase();
-    throw new AppError(`A ${statusText} permission request already exists for this date.`, 400);
+    const typeText = existing.permissionType?.replace('_', ' ').toLowerCase() || 'attendance';
+    throw new AppError(`You already have a ${statusText} ${typeText} request for this date (${target.toLocaleDateString()}). No new request is needed.`, 400);
   }
 
   const record = await prisma.attendance.upsert({

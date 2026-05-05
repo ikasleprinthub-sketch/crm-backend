@@ -3,6 +3,18 @@ import { ZodError } from 'zod';
 import { Prisma } from '@prisma/client';
 import { logger } from '../config/logger';
 
+// ─── Custom Error Class ───────────────────────────────────────────────────────
+export class AppError extends Error {
+  constructor(
+    public message: string,
+    public statusCode: number = 500
+  ) {
+    super(message);
+    this.name = 'AppError';
+    Error.captureStackTrace(this, this.constructor);
+  }
+}
+
 export function errorHandler(
   err: unknown,
   req: Request,
@@ -52,29 +64,22 @@ export function errorHandler(
 
   // ─── Custom App Errors ────────────────────────────────────────────────────
   if (err instanceof AppError) {
+    const cleanMessage = err.message.replace(/\x1B\[[0-9;]*[mK]/g, '');
     res.status(err.statusCode).json({
       success: false,
-      message: err.message,
+      message: cleanMessage,
     });
     return;
   }
 
   // ─── Fallback 500 ─────────────────────────────────────────────────────────
+  const rawMessage = process.env.NODE_ENV === 'development' && err instanceof Error ? err.message : 'Internal server error';
+  const cleanFallbackMessage = rawMessage.replace(/\x1B\[[0-9;]*[mK]/g, '');
+  
   res.status(500).json({
     success: false,
-    message: process.env.NODE_ENV === 'development' && err instanceof Error ? err.message : 'Internal server error',
+    message: cleanFallbackMessage,
     stack: process.env.NODE_ENV === 'development' && err instanceof Error ? err.stack : undefined,
   });
 }
 
-// ─── Custom Error Class ───────────────────────────────────────────────────────
-export class AppError extends Error {
-  constructor(
-    public message: string,
-    public statusCode: number = 500
-  ) {
-    super(message);
-    this.name = 'AppError';
-    Error.captureStackTrace(this, this.constructor);
-  }
-}

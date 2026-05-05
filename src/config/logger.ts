@@ -4,7 +4,7 @@ import { env } from './env';
 const { combine, timestamp, printf, colorize, errors } = winston.format;
 
 const devFormat = combine(
-  colorize({ all: true }),
+  colorize(),
   timestamp({ format: 'HH:mm:ss' }),
   errors({ stack: true }),
   printf(({ level, message, timestamp, stack }) => {
