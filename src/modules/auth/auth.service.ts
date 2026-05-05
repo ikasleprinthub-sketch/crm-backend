@@ -31,6 +31,11 @@ export const loginUser = async (data: any) => {
       name: user.name,
       email: user.email,
       role: user.role,
+      managerId: user.managerId,
+      manager: user.managerId ? await prisma.user.findUnique({
+        where: { id: user.managerId },
+        select: { id: true, name: true, email: true, role: true }
+      }) : null
     },
   };
 };
@@ -44,6 +49,15 @@ export const getCurrentUser = async (userId: string) => {
       name: true,
       email: true,
       role: true,
+      managerId: true,
+      manager: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+        }
+      }
     },
   });
 };

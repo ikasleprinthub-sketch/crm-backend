@@ -32,6 +32,7 @@ export async function assignManager(req: Request, res: Response): Promise<void> 
 }
 
 export async function remove(req: Request, res: Response): Promise<void> {
+  console.log(`🗑️ [UsersController] Deletion requested for ID: ${req.params.id} by actor: ${req.user?.id}`);
   await svc.deleteUser(req.params.id, req.user!);
   res.json({ success: true, message: 'User deleted' });
 }

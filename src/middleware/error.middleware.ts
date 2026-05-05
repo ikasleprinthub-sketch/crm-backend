@@ -62,7 +62,8 @@ export function errorHandler(
   // ─── Fallback 500 ─────────────────────────────────────────────────────────
   res.status(500).json({
     success: false,
-    message: 'Internal server error',
+    message: process.env.NODE_ENV === 'development' && err instanceof Error ? err.message : 'Internal server error',
+    stack: process.env.NODE_ENV === 'development' && err instanceof Error ? err.stack : undefined,
   });
 }
 

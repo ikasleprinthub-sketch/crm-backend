@@ -18,6 +18,8 @@ async function main() {
   await prisma.taskType.deleteMany();
   await prisma.department.deleteMany();
   await prisma.sourceOfLead.deleteMany();
+  await prisma.note.deleteMany();
+  await prisma.attendance.deleteMany();
   await prisma.user.deleteMany();
 
   console.log('✨ Database cleared.\n');
