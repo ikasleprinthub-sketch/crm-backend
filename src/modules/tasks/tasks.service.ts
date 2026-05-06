@@ -33,18 +33,18 @@ export async function createNewTask(data: any, actorId: string) {
       startDate:     data.startDate ? (() => {
         const d = new Date(data.startDate);
         if (isNaN(d.getTime())) throw new AppError('Invalid start date format', 400);
-        // Validation: Start time must be at or after 17:30
-        if (d.getHours() < 17 || (d.getHours() === 17 && d.getMinutes() < 30)) {
-          throw new AppError('Task start time must be 5:30 PM or later.', 400);
-        }
         return d;
       })() : undefined,
       completionDate:data.completionDate ? (() => {
         const d = new Date(data.completionDate);
         if (isNaN(d.getTime())) throw new AppError('Invalid completion date format', 400);
-        // Validation: Completion time must be at or after 17:30
-        if (d.getHours() < 17 || (d.getHours() === 17 && d.getMinutes() < 30)) {
-          throw new AppError('Task completion time cannot be before 5:30 PM.', 400);
+        
+        // Ensure completion date is not before start date
+        if (data.startDate) {
+          const start = new Date(data.startDate);
+          if (d < start) {
+            throw new AppError('Completion date cannot be before start date.', 400);
+          }
         }
         return d;
       })() : undefined,
@@ -58,27 +58,25 @@ export async function createNewTask(data: any, actorId: string) {
     include: { steps: true }
   });
 
-  if (!template || template.steps.length === 0) {
-    throw new AppError('No SOP steps defined for this task type. Please configure SOP steps in settings first.', 400);
+  if (template && template.steps.length > 0) {
+    const steps = template.steps.map(s => {
+      let dueAt = null;
+      if (s.deadlineHours > 0) {
+        dueAt = new Date(Date.now() + s.deadlineHours * 60 * 60 * 1000);
+      }
+      return {
+        taskId: task.id,
+        title:  s.title,
+        order:  s.order,
+        isCompleted: false,
+        assignedRole: s.assignedRole,
+        deadlineHours: s.deadlineHours,
+        dueAt
+      };
+    });
+
+    await prisma.taskSOPStep.createMany({ data: steps });
   }
-
-  const steps = template.steps.map(s => {
-    let dueAt = null;
-    if (s.deadlineHours > 0) {
-      dueAt = new Date(Date.now() + s.deadlineHours * 60 * 60 * 1000);
-    }
-    return {
-      taskId: task.id,
-      title:  s.title,
-      order:  s.order,
-      isCompleted: false,
-      assignedRole: s.assignedRole,
-      deadlineHours: s.deadlineHours,
-      dueAt
-    };
-  });
-
-  await prisma.taskSOPStep.createMany({ data: steps });
 
   // Notify assignee
   await createNotification({
