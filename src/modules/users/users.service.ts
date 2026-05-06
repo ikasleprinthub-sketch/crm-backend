@@ -100,6 +100,12 @@ export async function createUser(
     throw new AppError('Insufficient permissions', 403);
   }
 
+  console.log(`[UsersService] Creating user with email: "${data.email}"`);
+  if (data.email !== data.email.toLowerCase()) {
+    console.log(`[UsersService] REJECTING: Email "${data.email}" contains capital letters.`);
+    throw new AppError('Email must be in all lowercase letters (no capitals allowed)', 400);
+  }
+
   const existing = await prisma.user.findUnique({ where: { email: data.email } });
   if (existing) throw new AppError('Email already registered', 409);
 
@@ -221,7 +227,12 @@ export async function updateUser(
 
   const updateData: Record<string, any> = {};
   if (data.name)      updateData.name      = data.name;
-  if (data.email)     updateData.email     = data.email;
+  if (data.email) {
+    if (data.email !== data.email.toLowerCase()) {
+      throw new AppError('Email must be in all lowercase letters (no capitals allowed)', 400);
+    }
+    updateData.email = data.email;
+  }
   if (data.role)      updateData.role      = data.role;
   if (data.managerId !== undefined) updateData.managerId = data.managerId;
   

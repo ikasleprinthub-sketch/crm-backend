@@ -17,6 +17,17 @@ const taskInclude = {
 export async function createNewTask(data: any, actorId: string) {
   const taskNo = `T-${Date.now()}`;
   
+  // Email validation
+  if (data.email) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(data.email)) {
+      throw new AppError('Invalid email format', 400);
+    }
+    if (data.email !== data.email.toLowerCase()) {
+      throw new AppError('Email must be in all lowercase letters (no capitals allowed)', 400);
+    }
+  }
+  
   const task = await prisma.task.create({
     data: {
       taskNo,
@@ -184,6 +195,17 @@ export async function updateTask(
   actor: { id: string; role: string }
 ) {
   const task = await getTaskById(id, actor);
+  
+  // Email validation
+  if (data.email) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(data.email)) {
+      throw new AppError('Invalid email format', 400);
+    }
+    if (data.email !== data.email.toLowerCase()) {
+      throw new AppError('Email must be in all lowercase letters (no capitals allowed)', 400);
+    }
+  }
 
   // Only Admin/Manager can reassign
   if (data.assignedToId && actor.role === Role.EMPLOYEE) {
@@ -426,9 +448,13 @@ export async function getTaskActivity(taskId: string, actor: { id: string; role:
 }
 // ─── DELETE task ──────────────────────────────────────────────────────────────
 export async function deleteTask(id: string, actor: { id: string; role: string }) {
-  if (actor.role !== Role.SUPER_ADMIN) {
-    throw new AppError('Only administrators can delete tasks', 403);
+  if (actor.role !== Role.SUPER_ADMIN && actor.role !== Role.ADMIN) {
+    throw new AppError(
+      'Access Denied: You do not have sufficient permissions to delete tasks. This action is restricted to Admins and Super Admins.', 
+      403
+    );
   }
+
   await getTaskById(id, actor);
   return prisma.task.delete({ where: { id } });
 }

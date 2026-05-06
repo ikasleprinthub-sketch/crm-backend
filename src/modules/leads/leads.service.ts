@@ -87,6 +87,17 @@ export async function createLead(data: {
   if (!dept) throw new AppError('Department not found', 404);
   if (!tt)   throw new AppError('Task type not found', 404);
 
+  // Email validation
+  if (data.email) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(data.email)) {
+      throw new AppError('Invalid email format', 400);
+    }
+    if (data.email !== data.email.toLowerCase()) {
+      throw new AppError('Email must be in all lowercase letters (no capitals allowed)', 400);
+    }
+  }
+
   const leadNo = await generateLeadNo();
 
   const leadDate = data.date ? new Date(data.date) : new Date();
@@ -128,6 +139,17 @@ export async function updateLead(
   }>
 ) {
   await getLeadById(id);
+
+  // Email validation
+  if (data.email) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(data.email)) {
+      throw new AppError('Invalid email format', 400);
+    }
+    if (data.email !== data.email.toLowerCase()) {
+      throw new AppError('Email must be in all lowercase letters (no capitals allowed)', 400);
+    }
+  }
   return prisma.lead.update({
     where: { id },
     data: {
@@ -235,10 +257,54 @@ export async function convertLeadToTask(
 }
 
 // ─── DELETE lead ──────────────────────────────────────────────────────────────
-export async function deleteLead(id: string) {
-  const lead = await getLeadById(id);
-  if (lead.status === LeadStatus.CONVERTED) {
-    throw new AppError('Cannot delete a converted lead', 400);
+export async function deleteLead(id: string, actorRole: string) {
+  console.log(`[LeadsService] deleteLead called for ID: ${id} by Role: ${actorRole}`);
+  
+  // Strict Permission Check: Only Super Admin and Admin can delete leads
+  if (actorRole !== 'SUPER_ADMIN' && actorRole !== 'ADMIN') {
+    console.log(`[LeadsService] Blocked: Lead deletion attempt by unauthorized role (${actorRole})`);
+    throw new AppError(
+      'Access Denied: You do not have sufficient permissions to delete lead records. This action is restricted to Admins and Super Admins.', 
+      403
+    );
   }
-  return prisma.lead.delete({ where: { id } });
+
+
+  const lead = await getLeadById(id);
+
+  try {
+    return await prisma.$transaction(async (tx) => {
+      // Find all tasks associated with this lead
+      const tasks = await tx.task.findMany({
+        where: { leadId: id },
+        select: { id: true }
+      });
+
+      if (tasks.length > 0) {
+        console.log(`[LeadsService] Found ${tasks.length} tasks linked to lead ${id}. Cascading deletion...`);
+        const taskIds = tasks.map(t => t.id);
+
+        // 1. Nullify task references in activity logs (preserving the logs)
+        await tx.activityLog.updateMany({
+          where: { taskId: { in: taskIds } },
+          data: { taskId: null }
+        });
+
+        // 2. Delete associated tasks (Comments and SOPSteps cascade in DB)
+        await tx.task.deleteMany({
+          where: { leadId: id }
+        });
+      }
+
+      // 3. Delete the lead itself
+      const result = await tx.lead.delete({ where: { id } });
+      console.log(`[LeadsService] Lead ${id} deleted successfully.`);
+      return result;
+    });
+  } catch (error: any) {
+    if (error instanceof AppError) throw error;
+    console.error(`[LeadsService] Error deleting lead ${id}:`, error.message);
+    throw error;
+  }
 }
+
