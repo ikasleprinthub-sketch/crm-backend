@@ -18,11 +18,15 @@ export async function getOne(req: Request, res: Response, next: NextFunction): P
 }
 
 export async function create(req: Request, res: Response, next: NextFunction): Promise<void> {
+  console.log(`[UsersController] Incoming create request body:`, req.body);
   try {
     const validated = createUserSchema.parse(req.body);
     const data = await svc.createUser(validated as any, req.user!);
     res.status(201).json({ success: true, data });
-  } catch (e) { next(e); }
+  } catch (e) { 
+    console.error(`[UsersController] Validation failed:`, e);
+    next(e); 
+  }
 }
 
 export async function update(req: Request, res: Response, next: NextFunction): Promise<void> {

@@ -2,7 +2,6 @@ import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import morgan from 'morgan';
-import rateLimit from 'express-rate-limit';
 import { env } from './config/env';
 import { errorHandler } from './middleware/error.middleware';
 import { requestLogger } from './middleware/logger.middleware';
@@ -44,22 +43,10 @@ app.use(
 );
 
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 1000,
-  message: { success: false, message: 'Too many requests, please try again later.' },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: env.NODE_ENV === 'development' ? 100 : 20, // More attempts allowed in dev
-  message: { success: false, message: 'Too many auth attempts, please try again later.' },
-});
+import { standardLimiter } from './middleware/rateLimit.middleware';
 
 if (env.NODE_ENV === 'production') {
-  app.use(limiter);
+  app.use(standardLimiter);
 }
 
 // ─── Body Parsing ─────────────────────────────────────────────────────────────
@@ -80,7 +67,7 @@ app.get('/health', (_req, res) => {
 });
 
 // ─── API Routes ───────────────────────────────────────────────────────────────
-app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api/auth', authRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/leads', leadsRoutes);
 app.use('/api/tasks', tasksRoutes);
