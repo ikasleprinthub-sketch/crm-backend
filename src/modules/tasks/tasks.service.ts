@@ -17,6 +17,17 @@ const taskInclude = {
 export async function createNewTask(data: any, actorId: string) {
   const taskNo = `T-${Date.now()}`;
   
+  // Email validation
+  if (data.email) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(data.email)) {
+      throw new AppError('Invalid email format', 400);
+    }
+    if (data.email !== data.email.toLowerCase()) {
+      throw new AppError('Email must be in all lowercase letters (no capitals allowed)', 400);
+    }
+  }
+  
   const task = await prisma.task.create({
     data: {
       taskNo,
@@ -33,18 +44,18 @@ export async function createNewTask(data: any, actorId: string) {
       startDate:     data.startDate ? (() => {
         const d = new Date(data.startDate);
         if (isNaN(d.getTime())) throw new AppError('Invalid start date format', 400);
-        // Validation: Start time must be at or after 17:30
-        if (d.getHours() < 17 || (d.getHours() === 17 && d.getMinutes() < 30)) {
-          throw new AppError('Task start time must be 5:30 PM or later.', 400);
-        }
         return d;
       })() : undefined,
       completionDate:data.completionDate ? (() => {
         const d = new Date(data.completionDate);
         if (isNaN(d.getTime())) throw new AppError('Invalid completion date format', 400);
-        // Validation: Completion time must be at or after 17:30
-        if (d.getHours() < 17 || (d.getHours() === 17 && d.getMinutes() < 30)) {
-          throw new AppError('Task completion time cannot be before 5:30 PM.', 400);
+        
+        // Ensure completion date is not before start date
+        if (data.startDate) {
+          const start = new Date(data.startDate);
+          if (d < start) {
+            throw new AppError('Completion date cannot be before start date.', 400);
+          }
         }
         return d;
       })() : undefined,
@@ -58,27 +69,25 @@ export async function createNewTask(data: any, actorId: string) {
     include: { steps: true }
   });
 
-  if (!template || template.steps.length === 0) {
-    throw new AppError('No SOP steps defined for this task type. Please configure SOP steps in settings first.', 400);
+  if (template && template.steps.length > 0) {
+    const steps = template.steps.map(s => {
+      let dueAt = null;
+      if (s.deadlineHours > 0) {
+        dueAt = new Date(Date.now() + s.deadlineHours * 60 * 60 * 1000);
+      }
+      return {
+        taskId: task.id,
+        title:  s.title,
+        order:  s.order,
+        isCompleted: false,
+        assignedRole: s.assignedRole,
+        deadlineHours: s.deadlineHours,
+        dueAt
+      };
+    });
+
+    await prisma.taskSOPStep.createMany({ data: steps });
   }
-
-  const steps = template.steps.map(s => {
-    let dueAt = null;
-    if (s.deadlineHours > 0) {
-      dueAt = new Date(Date.now() + s.deadlineHours * 60 * 60 * 1000);
-    }
-    return {
-      taskId: task.id,
-      title:  s.title,
-      order:  s.order,
-      isCompleted: false,
-      assignedRole: s.assignedRole,
-      deadlineHours: s.deadlineHours,
-      dueAt
-    };
-  });
-
-  await prisma.taskSOPStep.createMany({ data: steps });
 
   // Notify assignee
   await createNotification({
@@ -186,6 +195,17 @@ export async function updateTask(
   actor: { id: string; role: string }
 ) {
   const task = await getTaskById(id, actor);
+  
+  // Email validation
+  if (data.email) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(data.email)) {
+      throw new AppError('Invalid email format', 400);
+    }
+    if (data.email !== data.email.toLowerCase()) {
+      throw new AppError('Email must be in all lowercase letters (no capitals allowed)', 400);
+    }
+  }
 
   // Only Admin/Manager can reassign
   if (data.assignedToId && actor.role === Role.EMPLOYEE) {
@@ -428,9 +448,13 @@ export async function getTaskActivity(taskId: string, actor: { id: string; role:
 }
 // ─── DELETE task ──────────────────────────────────────────────────────────────
 export async function deleteTask(id: string, actor: { id: string; role: string }) {
-  if (actor.role !== Role.SUPER_ADMIN) {
-    throw new AppError('Only administrators can delete tasks', 403);
+  if (actor.role !== Role.SUPER_ADMIN && actor.role !== Role.ADMIN) {
+    throw new AppError(
+      'Access Denied: You do not have sufficient permissions to delete tasks. This action is restricted to Admins and Super Admins.', 
+      403
+    );
   }
+
   await getTaskById(id, actor);
   return prisma.task.delete({ where: { id } });
 }
