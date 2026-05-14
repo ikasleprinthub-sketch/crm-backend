@@ -41,10 +41,46 @@ export async function updateTemplateSteps(
         }))
       });
     }
-
-    return tx.sOPTemplate.findUnique({
+    const updatedTemplate = await tx.sOPTemplate.findUnique({
       where: { id: template!.id },
       include: { steps: { orderBy: { order: 'asc' } } }
     });
+
+    // 4. Apply to existing tasks that have NO SOP steps
+    // We use an explicit count check to ensure accuracy
+    const allTasks = await tx.task.findMany({
+      where: { taskTypeId },
+      include: { _count: { select: { sopSteps: true } } }
+    });
+
+    const tasksToUpdate = allTasks.filter(t => t._count.sopSteps === 0);
+
+    for (const task of tasksToUpdate) {
+      if (steps.length > 0) {
+        // Prepare steps with calculated due dates
+        const stepsToCreate = steps.map(s => {
+          const deadlineHours = s.deadlineHours || 0;
+          let dueAt: Date | null = null;
+          if (deadlineHours > 0) {
+            dueAt = new Date();
+            dueAt.setHours(dueAt.getHours() + deadlineHours);
+          }
+
+          return {
+            taskId: task.id,
+            title: s.title,
+            order: s.order,
+            assignedRole: s.assignedRole || 'EMPLOYEE',
+            deadlineHours: deadlineHours,
+            dueAt: dueAt,
+            isCompleted: false
+          };
+        });
+
+        await tx.taskSOPStep.createMany({ data: stepsToCreate });
+      }
+    }
+
+    return updatedTemplate;
   });
 }

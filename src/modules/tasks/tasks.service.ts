@@ -6,11 +6,14 @@ import { createNotification } from '../notifications/notifications.service';
 
 // ─── Include shape ─────────────────────────────────────────────────────────────
 const taskInclude = {
-  lead:       { select: { id: true, leadNo: true, leadName: true } },
+  lead:       { select: { id: true, leadNo: true, leadName: true, contactNumber: true, email: true } },
   department: { select: { id: true, name: true } },
   taskType:   { select: { id: true, name: true } },
   assignedTo: { select: { id: true, name: true, email: true, role: true, managerId: true } },
-  sopSteps:   { orderBy: { order: 'asc' as const } },
+  sopSteps:   { 
+    orderBy: { order: 'asc' as const },
+    include: { completedBy: { select: { id: true, name: true } } }
+  },
 } as const;
 
 // ─── CREATE task ──────────────────────────────────────────────────────────────
@@ -353,7 +356,8 @@ export async function toggleSOPStep(
     throw new AppError(`Access Denied: This step requires ${step.assignedRole} role.`, 403);
   }
 
-  // 2. Step Lock Logic (Sequential Execution)
+  // 2. Step Lock Logic (REMOVED as per request to allow flexible toggling)
+  /*
   if (isCompleted) {
     const previousStep = await prisma.taskSOPStep.findFirst({
       where: { 
@@ -381,12 +385,14 @@ export async function toggleSOPStep(
       throw new AppError(`Workflow Lock: Cannot undo "${step.title}" because the next step "${nextStep.title}" is already completed.`, 400);
     }
   }
+  */
 
   const updated = await prisma.taskSOPStep.update({
     where: { id: stepId },
     data: { 
       isCompleted, 
-      completedAt: isCompleted ? new Date() : null 
+      completedAt: isCompleted ? new Date() : null,
+      completedById: isCompleted ? actor.id : null
     },
   });
 

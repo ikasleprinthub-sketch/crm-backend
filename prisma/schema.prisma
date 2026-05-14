@@ -36,6 +36,7 @@ model User {
 
   attendance          Attendance[] @relation("UserAttendance")
   permissionsApproved Attendance[] @relation("PermissionApprover")
+  sopStepsCompleted   TaskSOPStep[] @relation("SOPStepCompletedBy")
 
   @@map("users")
 }
@@ -153,11 +154,13 @@ model TaskSOPStep {
   order         Int
   isCompleted   Boolean   @default(false)
   completedAt   DateTime?
+  completedById String?
   assignedRole  Role      @default(EMPLOYEE)
   deadlineHours Int       @default(0)
   dueAt         DateTime?
   createdAt     DateTime  @default(now())
   task          Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  completedBy   User?     @relation("SOPStepCompletedBy", fields: [completedById], references: [id])
 
   @@map("task_sop_steps")
 }
