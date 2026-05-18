@@ -252,8 +252,6 @@ model Attendance {
   totalHours             Float?
   morningPlan            String?
   afternoonPlan          String?
-  eveningPlan            String?
-  nightPlan              String?
   dayCompletion          String?
   permission             PermissionStatus @default(NONE)
   permissionType         PermissionType?
