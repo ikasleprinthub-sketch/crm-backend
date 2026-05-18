@@ -75,18 +75,12 @@ export async function submitMorningPlan(userId: string, content: string) {
   const today = getTodayDate();
   const hour = new Date().getHours();
 
-  let field: 'morningPlan' | 'afternoonPlan' | 'eveningPlan' | 'nightPlan' = 'morningPlan';
+  let field: 'morningPlan' | 'afternoonPlan' = 'morningPlan';
   let planType = 'Morning';
 
-  if (hour >= 12 && hour < 17) {
+  if (hour >= 12) {
     field = 'afternoonPlan';
     planType = 'Afternoon';
-  } else if (hour >= 17 && hour < 21) {
-    field = 'eveningPlan';
-    planType = 'Evening';
-  } else if (hour >= 21) {
-    field = 'nightPlan';
-    planType = 'Night';
   }
 
   const record = await prisma.attendance.findUnique({
@@ -101,7 +95,7 @@ export async function submitMorningPlan(userId: string, content: string) {
       userId,
       title: `${planType} Plan — ${today.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}`,
       content: content,
-      color: field === 'morningPlan' ? 'blue' : field === 'afternoonPlan' ? 'orange' : field === 'eveningPlan' ? 'purple' : 'gray'
+      color: field === 'morningPlan' ? 'blue' : 'orange'
     }
   });
 
@@ -150,6 +144,13 @@ export async function applyPermission(
   reason: string,
   dateStr?: string,
 ) {
+  if (!reason || !reason.trim()) {
+    throw new AppError('Reason is required.', 400);
+  }
+  if (!/^[a-zA-Z0-9\s]+$/.test(reason)) {
+    throw new AppError('Invalid Reason: Reason must contain only letters, numbers, and spaces.', 400);
+  }
+
   const target = dateStr ? new Date(dateStr) : new Date();
   target.setUTCHours(0, 0, 0, 0);
 
