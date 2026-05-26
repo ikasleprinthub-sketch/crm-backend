@@ -74,8 +74,8 @@ model SourceOfLead {
 }
 
 model Lead {
-  id            String       @id @default(uuid())
-  leadNo        String       @unique
+  id            String         @id @default(uuid())
+  leadNo        String         @unique
   date          DateTime
   sourceId      String
   leadName      String
@@ -85,20 +85,21 @@ model Lead {
   departmentId  String
   taskTypeId    String
   remarks       String?
-  status        LeadStatus   @default(NEW)
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  department    Department   @relation(fields: [departmentId], references: [id])
-  source        SourceOfLead @relation(fields: [sourceId], references: [id])
-  taskType      TaskType     @relation(fields: [taskTypeId], references: [id])
+  status        LeadStatus     @default(NEW)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  department    Department     @relation(fields: [departmentId], references: [id])
+  source        SourceOfLead   @relation(fields: [sourceId], references: [id])
+  taskType      TaskType       @relation(fields: [taskTypeId], references: [id])
   tasks         Task[]
+  documents     LeadDocument[]
 
   @@map("leads")
 }
 
 model Task {
-  id             String        @id @default(uuid())
-  taskNo         String        @unique
+  id             String         @id @default(uuid())
+  taskNo         String         @unique
   leadId         String
   departmentId   String
   taskTypeId     String
@@ -107,19 +108,20 @@ model Task {
   contactNumber  String?
   email          String?
   assignedToId   String
-  status         TaskStatus    @default(NOT_YET_STARTED)
-  priority       Priority      @default(REGULAR)
+  status         TaskStatus     @default(NOT_YET_STARTED)
+  priority       Priority       @default(REGULAR)
   startDate      DateTime?
   completionDate DateTime?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
   activityLogs   ActivityLog[]
   comments       Comment[]
   sopSteps       TaskSOPStep[]
-  assignedTo     User          @relation("TaskAssignedTo", fields: [assignedToId], references: [id])
-  department     Department    @relation(fields: [departmentId], references: [id])
-  lead           Lead          @relation(fields: [leadId], references: [id])
-  taskType       TaskType      @relation(fields: [taskTypeId], references: [id])
+  documents      TaskDocument[]
+  assignedTo     User           @relation("TaskAssignedTo", fields: [assignedToId], references: [id])
+  department     Department     @relation(fields: [departmentId], references: [id])
+  lead           Lead           @relation(fields: [leadId], references: [id])
+  taskType       TaskType       @relation(fields: [taskTypeId], references: [id])
 
   @@map("tasks")
 }
@@ -312,4 +314,41 @@ model SystemConfig {
   updatedAt DateTime @updatedAt
 
   @@map("system_configs")
+}
+
+enum DocumentCategory {
+  AADHAR
+  PAN
+  GST
+  PHOTO
+  OTHER
+}
+
+model LeadDocument {
+  id           String           @id @default(uuid())
+  leadId       String
+  category     DocumentCategory
+  originalName String
+  savedName    String
+  filePath     String
+  mimeType     String
+  size         Int
+  uploadedAt   DateTime         @default(now())
+  lead         Lead             @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@map("lead_documents")
+}
+
+model TaskDocument {
+  id           String   @id @default(uuid())
+  taskId       String
+  originalName String
+  savedName    String
+  filePath     String
+  mimeType     String
+  size         Int
+  uploadedAt   DateTime @default(now())
+  task         Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@map("task_documents")
 }
