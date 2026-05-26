@@ -2,6 +2,7 @@ import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import morgan from 'morgan';
+import path from 'path';
 import { env } from './config/env';
 import { errorHandler } from './middleware/error.middleware';
 import { requestLogger } from './middleware/logger.middleware'; //hi
@@ -22,6 +23,7 @@ import attendanceRoutes from './modules/attendance/attendance.routes';
 import intelligenceRoutes from './modules/intelligence/intelligence.routes';
 import notesRoutes from './modules/notes/notes.routes';
 import configRoutes from './modules/config/config.routes';
+import documentsRoutes from './modules/documents/documents.routes';
 
 const app = express();
 
@@ -54,6 +56,9 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(requestLogger);
 
+// ─── Static File Serving (Uploaded Documents) ─────────────────────────────────
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+
 // ─── Logging ──────────────────────────────────────────────────────────────────
 app.use(
   morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev', {
@@ -82,6 +87,7 @@ app.use('/api/notifications', notificationsRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/intelligence', intelligenceRoutes);
 app.use('/api/notes', notesRoutes);
+app.use('/api', documentsRoutes);
 
 // ─── 404 Handler ─────────────────────────────────────────────────────────────
 app.use((_req, res) => {
