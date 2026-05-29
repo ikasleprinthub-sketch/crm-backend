@@ -4,6 +4,7 @@ import fs from 'fs';
 import { Request, Response, NextFunction } from 'express';
 import { AppError } from '../../middleware/error.middleware';
 import { env } from '../../config/env';
+import { prisma } from '../../lib/prisma';
 
 const ALLOWED_MIME = new Set([
   'application/pdf',
@@ -22,6 +23,18 @@ export function getUploadDir(): string {
   return env.UPLOAD_DIR || path.join(process.cwd(), 'uploads');
 }
 
+// Converts any lead/business name into a safe folder name.
+// e.g. "Acme & Co. Ltd!" → "acme_co_ltd"
+export function sanitizeFolderName(name: string): string {
+  return (
+    name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '') || 'unknown'
+  );
+}
+
 function fileFilter(_req: Request, file: Express.Multer.File, cb: FileFilterCallback) {
   const ext = path.extname(file.originalname).toLowerCase();
   if (!ALLOWED_EXT.has(ext) || !ALLOWED_MIME.has(file.mimetype)) {
@@ -32,10 +45,19 @@ function fileFilter(_req: Request, file: Express.Multer.File, cb: FileFilterCall
 
 export const leadUpload = multer({
   storage: multer.diskStorage({
-    destination: (req, _file, cb) => {
-      const dir = path.join(getUploadDir(), 'customers', req.params.leadId);
-      fs.mkdirSync(dir, { recursive: true });
-      cb(null, dir);
+    destination: async (req, _file, cb) => {
+      try {
+        const lead = await prisma.lead.findUnique({
+          where: { id: req.params.leadId },
+          select: { leadName: true },
+        });
+        const folderName = sanitizeFolderName(lead?.leadName ?? req.params.leadId);
+        const dir = path.join(getUploadDir(), folderName);
+        fs.mkdirSync(dir, { recursive: true });
+        cb(null, dir);
+      } catch (err) {
+        cb(err as Error, '');
+      }
     },
     filename: (_req, file, cb) => {
       const ext = path.extname(file.originalname).toLowerCase();

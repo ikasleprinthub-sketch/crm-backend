@@ -4,6 +4,7 @@ import cors from 'cors';
 import morgan from 'morgan';
 import path from 'path';
 import { env } from './config/env';
+import { getUploadDir } from './modules/documents/upload.middleware';
 import { errorHandler } from './middleware/error.middleware';
 import { requestLogger } from './middleware/logger.middleware'; //hi
 
@@ -57,7 +58,8 @@ app.use(express.urlencoded({ extended: true }));
 app.use(requestLogger);
 
 // ─── Static File Serving (Uploaded Documents) ─────────────────────────────────
-app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+// Uses UPLOAD_DIR env var on VPS, falls back to <project>/uploads in development
+app.use('/uploads', express.static(getUploadDir()));
 
 // ─── Logging ──────────────────────────────────────────────────────────────────
 app.use(

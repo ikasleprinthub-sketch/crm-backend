@@ -3,18 +3,29 @@ import fs from 'fs';
 import { DocumentCategory } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { AppError } from '../../middleware/error.middleware';
-import { getUploadDir } from './upload.middleware';
+import { getUploadDir, sanitizeFolderName } from './upload.middleware';
 
 // ─── Lead Documents ───────────────────────────────────────────────────────────
 
 export async function getLeadDocuments(leadId: string) {
-  const lead = await prisma.lead.findUnique({ where: { id: leadId } });
+  const lead = await prisma.lead.findUnique({ where: { id: leadId }, select: { id: true, leadName: true } });
   if (!lead) throw new AppError('Lead not found', 404);
 
-  return prisma.leadDocument.findMany({
-    where: { leadId },
+  // Find every lead that shares the same business name (case-insensitive)
+  const siblings = await prisma.lead.findMany({
+    where: { leadName: { equals: lead.leadName, mode: 'insensitive' } },
+    select: { id: true, leadNo: true },
+  });
+  const siblingIds = siblings.map((s) => s.id);
+
+  const docs = await prisma.leadDocument.findMany({
+    where: { leadId: { in: siblingIds } },
     orderBy: { uploadedAt: 'desc' },
   });
+
+  // Attach leadNo to each document so the frontend can show which lead it came from
+  const leadNoMap = Object.fromEntries(siblings.map((s) => [s.id, s.leadNo]));
+  return docs.map((d) => ({ ...d, fromLeadNo: leadNoMap[d.leadId] }));
 }
 
 export async function createLeadDocument(
@@ -25,13 +36,15 @@ export async function createLeadDocument(
   const lead = await prisma.lead.findUnique({ where: { id: leadId } });
   if (!lead) throw new AppError('Lead not found', 404);
 
+  const folderName = sanitizeFolderName(lead.leadName);
+
   return prisma.leadDocument.create({
     data: {
       leadId,
       category,
       originalName: file.originalname,
       savedName: file.filename,
-      filePath: `/uploads/customers/${leadId}`,
+      filePath: `/uploads/${folderName}`,
       mimeType: file.mimetype,
       size: file.size,
     },
@@ -42,7 +55,9 @@ export async function deleteLeadDocument(docId: string) {
   const doc = await prisma.leadDocument.findUnique({ where: { id: docId } });
   if (!doc) throw new AppError('Document not found', 404);
 
-  const fullPath = path.join(getUploadDir(), 'customers', doc.leadId, doc.savedName);
+  // filePath stored as "/uploads/acme_corp" — strip leading /uploads/ to get subfolder
+  const subFolder = doc.filePath.replace(/^\/uploads\//, '');
+  const fullPath = path.join(getUploadDir(), subFolder, doc.savedName);
   if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
 
   return prisma.leadDocument.delete({ where: { id: docId } });
