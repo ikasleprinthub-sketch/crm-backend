@@ -5,10 +5,21 @@ import { LeadStatus } from "@prisma/client";
 export const createLead = async (data: any) => {
   const leadNo = `L-${Date.now()}`;
 
+  // Find existing client by business name (case-insensitive) or create one
+  let client = await prisma.client.findFirst({
+    where: { businessName: { equals: data.leadName, mode: 'insensitive' } },
+  });
+  if (!client) {
+    client = await prisma.client.create({
+      data: { businessName: data.leadName },
+    });
+  }
+
   return prisma.lead.create({
     data: {
       leadNo,
       date: new Date(),
+      clientId: client.id,
       sourceId: data.sourceId,
       leadName: data.leadName,
       contactName: data.contactName,

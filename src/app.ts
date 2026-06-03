@@ -45,6 +45,11 @@ app.use(
   })
 );
 
+// ─── Trust Proxy (required for correct client IP behind Nginx / Railway / Vercel) ─
+if (env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
 import { standardLimiter } from './middleware/rateLimit.middleware';
 
