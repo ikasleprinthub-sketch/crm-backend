@@ -39,6 +39,7 @@ model User {
   sopStepsCompleted     TaskSOPStep[]   @relation("SOPStepCompletedBy")
   uploadedLeadDocuments LeadDocument[]  @relation("LeadDocUploader")
   uploadedTaskDocuments TaskDocument[]  @relation("TaskDocUploader")
+  recurringConfigs      RecurringTaskConfig[] @relation("UserRecurringConfigs")
 
   @@map("users")
 }
@@ -108,6 +109,7 @@ model Lead {
   taskType      TaskType       @relation(fields: [taskTypeId], references: [id])
   tasks         Task[]
   documents     LeadDocument[]
+  recurringConfig RecurringTaskConfig?
 
   @@map("leads")
 }
@@ -129,6 +131,7 @@ model Task {
   completionDate DateTime?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
+  isAutomated    Boolean        @default(false)
   activityLogs   ActivityLog[]
   comments       Comment[]
   sopSteps       TaskSOPStep[]
@@ -372,4 +375,27 @@ model TaskDocument {
   uploadedBy   User?    @relation("TaskDocUploader", fields: [uploadedById], references: [id])
 
   @@map("task_documents")
+}
+
+enum RecurrenceInterval {
+  MONTHLY
+  QUARTERLY
+  YEARLY
+  CUSTOM
+}
+
+model RecurringTaskConfig {
+  id           String             @id @default(uuid())
+  leadId       String             @unique
+  lead         Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  interval     RecurrenceInterval
+  nextDueDate  DateTime
+  assignedToId String
+  assignedTo   User               @relation("UserRecurringConfigs", fields: [assignedToId], references: [id])
+  remarks      String?
+  isActive     Boolean            @default(true)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  @@map("recurring_task_configs")
 }

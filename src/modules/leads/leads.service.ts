@@ -1,6 +1,6 @@
 import { prisma } from '../../lib/prisma';
 import { AppError } from '../../middleware/error.middleware';
-import { LeadStatus } from '@prisma/client';
+import { LeadStatus, RecurrenceInterval } from '@prisma/client';
 import { createNotification } from '../notifications/notifications.service';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -172,6 +172,10 @@ export async function convertLeadToTask(
     remarks?: string;
     priority?: string;
     startDate?: string;
+    recurrence?: {
+      interval: RecurrenceInterval;
+      nextDueDate?: string;
+    };
   },
   actorId: string
 ) {
@@ -249,6 +253,36 @@ export async function convertLeadToTask(
       type:    'TASK_ASSIGNED',
       link:    `/tasks/${newTask.id}`,
     });
+
+    // Create Recurrence Configuration if requested
+    if (data.recurrence) {
+      let nextDueDate = new Date();
+      if (data.recurrence.interval === 'MONTHLY') {
+        nextDueDate.setMonth(nextDueDate.getMonth() + 1);
+      } else if (data.recurrence.interval === 'QUARTERLY') {
+        nextDueDate.setMonth(nextDueDate.getMonth() + 3);
+      } else if (data.recurrence.interval === 'YEARLY') {
+        nextDueDate.setFullYear(nextDueDate.getFullYear() + 1);
+      } else if (data.recurrence.interval === 'CUSTOM') {
+        if (!data.recurrence.nextDueDate) {
+          throw new AppError('Custom next due date is required', 400);
+        }
+        nextDueDate = new Date(data.recurrence.nextDueDate);
+        if (isNaN(nextDueDate.getTime())) {
+          throw new AppError('Invalid custom next due date format', 400);
+        }
+      }
+
+      await tx.recurringTaskConfig.create({
+        data: {
+          leadId,
+          interval: data.recurrence.interval,
+          nextDueDate,
+          assignedToId: data.assignedToId,
+          remarks: data.remarks,
+        },
+      });
+    }
 
     return newTask;
   });
