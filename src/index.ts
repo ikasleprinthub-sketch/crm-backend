@@ -19,6 +19,10 @@ async function bootstrap() {
     const { initSocket } = await import('./lib/socket');
     initSocket(server);
 
+    // Start background jobs
+    const { startRecurringTasksJob } = await import('./jobs/recurringTasks');
+    startRecurringTasksJob();
+
     // ─── Graceful Shutdown ──────────────────────────────────────────────────── //
     const shutdown = async (signal: string) => {
       logger.info(`${signal} received — shutting down gracefully`);
