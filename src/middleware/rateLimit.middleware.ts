@@ -3,9 +3,9 @@ import { env } from '../config/env';
 
 export const standardLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: env.NODE_ENV === 'development' ? 5000 : 1000,
+  max: env.NODE_ENV === 'development' ? 5000 : 3000,
   message: { success: false, message: 'Too many requests, please try again later.' },
-  standardHeaders: true,
+  standardHeaders: true, // sends RateLimit-* headers so clients can read Retry-After
   legacyHeaders: false,
 });
 

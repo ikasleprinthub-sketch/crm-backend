@@ -49,10 +49,11 @@ export const leadUpload = multer({
       try {
         const lead = await prisma.lead.findUnique({
           where: { id: req.params.leadId },
-          select: { leadName: true },
+          select: { clientId: true },
         });
-        const folderName = sanitizeFolderName(lead?.leadName ?? req.params.leadId);
-        const dir = path.join(getUploadDir(), folderName);
+        // Use clientId folder if available (new leads), fall back to leadId (legacy)
+        const folder = lead?.clientId ?? req.params.leadId;
+        const dir = path.join(getUploadDir(), folder);
         fs.mkdirSync(dir, { recursive: true });
         cb(null, dir);
       } catch (err) {
@@ -70,10 +71,20 @@ export const leadUpload = multer({
 
 export const taskUpload = multer({
   storage: multer.diskStorage({
-    destination: (req, _file, cb) => {
-      const dir = path.join(getUploadDir(), 'tasks', req.params.taskId);
-      fs.mkdirSync(dir, { recursive: true });
-      cb(null, dir);
+    destination: async (req, _file, cb) => {
+      try {
+        const task = await prisma.task.findUnique({
+          where: { id: req.params.taskId },
+          select: { leadId: true, lead: { select: { clientId: true } } },
+        });
+        // Use clientId folder if available, fall back to leadId (legacy)
+        const folder = task?.lead?.clientId ?? task?.leadId ?? req.params.taskId;
+        const dir = path.join(getUploadDir(), folder);
+        fs.mkdirSync(dir, { recursive: true });
+        cb(null, dir);
+      } catch (err) {
+        cb(err as Error, '');
+      }
     },
     filename: (_req, file, cb) => {
       const ext = path.extname(file.originalname).toLowerCase();

@@ -34,9 +34,11 @@ model User {
   approvedBy    User?          @relation("ApproverToUsers", fields: [approvedById], references: [id])
   approvedUsers User[]         @relation("ApproverToUsers")
 
-  attendance          Attendance[] @relation("UserAttendance")
-  permissionsApproved Attendance[] @relation("PermissionApprover")
-  sopStepsCompleted   TaskSOPStep[] @relation("SOPStepCompletedBy")
+  attendance            Attendance[]    @relation("UserAttendance")
+  permissionsApproved   Attendance[]    @relation("PermissionApprover")
+  sopStepsCompleted     TaskSOPStep[]   @relation("SOPStepCompletedBy")
+  uploadedLeadDocuments LeadDocument[]  @relation("LeadDocUploader")
+  uploadedTaskDocuments TaskDocument[]  @relation("TaskDocUploader")
 
   @@map("users")
 }
@@ -73,6 +75,17 @@ model SourceOfLead {
   @@map("sources_of_lead")
 }
 
+model Client {
+  id           String         @id @default(uuid())
+  businessName String
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  leads        Lead[]
+  documents    LeadDocument[]
+
+  @@map("clients")
+}
+
 model Lead {
   id            String         @id @default(uuid())
   leadNo        String         @unique
@@ -88,6 +101,8 @@ model Lead {
   status        LeadStatus     @default(NEW)
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
+  clientId      String?
+  client        Client?        @relation(fields: [clientId], references: [id])
   department    Department     @relation(fields: [departmentId], references: [id])
   source        SourceOfLead   @relation(fields: [sourceId], references: [id])
   taskType      TaskType       @relation(fields: [taskTypeId], references: [id])
@@ -333,8 +348,12 @@ model LeadDocument {
   filePath     String
   mimeType     String
   size         Int
+  clientId     String?
+  uploadedById String?
   uploadedAt   DateTime         @default(now())
   lead         Lead             @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  client       Client?          @relation(fields: [clientId], references: [id])
+  uploadedBy   User?            @relation("LeadDocUploader", fields: [uploadedById], references: [id])
 
   @@map("lead_documents")
 }
@@ -347,8 +366,10 @@ model TaskDocument {
   filePath     String
   mimeType     String
   size         Int
+  uploadedById String?
   uploadedAt   DateTime @default(now())
   task         Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploadedBy   User?    @relation("TaskDocUploader", fields: [uploadedById], references: [id])
 
   @@map("task_documents")
 }

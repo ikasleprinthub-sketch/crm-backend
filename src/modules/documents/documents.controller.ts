@@ -21,7 +21,7 @@ export async function uploadLeadDoc(req: Request, res: Response, next: NextFunct
       throw new AppError(`category must be one of: ${Object.values(DocumentCategory).join(', ')}`, 400);
     }
 
-    const data = await svc.createLeadDocument(req.params.leadId, req.file, category as DocumentCategory);
+    const data = await svc.createLeadDocument(req.params.leadId, req.file, category as DocumentCategory, (req as any).user?.id);
     res.status(201).json({ success: true, data });
   } catch (err) { next(err); }
 }
@@ -45,7 +45,7 @@ export async function getTaskDocs(req: Request, res: Response, next: NextFunctio
 export async function uploadTaskDoc(req: Request, res: Response, next: NextFunction) {
   try {
     if (!req.file) throw new AppError('No file uploaded', 400);
-    const data = await svc.createTaskDocument(req.params.taskId, req.file);
+    const data = await svc.createTaskDocument(req.params.taskId, req.file, (req as any).user?.id);
     res.status(201).json({ success: true, data });
   } catch (err) { next(err); }
 }
