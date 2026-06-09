@@ -29,6 +29,7 @@ export async function getAttendanceTrends(days: number = 30): Promise<Attendance
     select: {
       date: true,
       status: true,
+      checkInStatus: true,
     },
     orderBy: { date: 'asc' },
   });
@@ -41,9 +42,9 @@ export async function getAttendanceTrends(days: number = 30): Promise<Attendance
       trendsMap.set(dStr, { date: dStr, present: 0, absent: 0, late: 0 });
     }
     const trend = trendsMap.get(dStr)!;
-    if (record.status === 'PRESENT') trend.present++;
-    else if (record.status === 'LATE') trend.late++;
-    else if (record.status === 'ABSENT') trend.absent++;
+    if (record.status === 'PRESENT' || record.status === 'HALF_DAY') trend.present++;
+    if (record.checkInStatus === 'LATE' || record.checkInStatus === 'VERY_LATE') trend.late++;
+    if (record.status === 'ABSENT') trend.absent++;
   });
 
   return Array.from(trendsMap.values());
@@ -58,7 +59,7 @@ export async function getGlobalPerformance(): Promise<PerformanceStats[]> {
   const statsPromises = users.map(async (user) => {
     // 1. Attendance Metrics
     const totalDays = await prisma.attendance.count({ where: { userId: user.id, NOT: { status: 'NOT_MARKED' } } });
-    const presentDays = await prisma.attendance.count({ where: { userId: user.id, status: { in: ['PRESENT', 'LATE'] } } });
+    const presentDays = await prisma.attendance.count({ where: { userId: user.id, status: { in: ['PRESENT', 'HALF_DAY'] } } });
     const attendanceRate = totalDays > 0 ? (presentDays / totalDays) * 100 : 0;
 
     // 2. Task Metrics

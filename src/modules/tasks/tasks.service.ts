@@ -3,6 +3,8 @@ import { AppError } from '../../middleware/error.middleware';
 import { TaskStatus, Priority, Role } from '@prisma/client';
 import { createLog } from '../activity/activity.service';
 import { createNotification } from '../notifications/notifications.service';
+import { getConfig } from '../config/config.service';
+import { emitGlobal } from '../../lib/socket';
 
 // ─── Include shape ─────────────────────────────────────────────────────────────
 const taskInclude = {
@@ -93,16 +95,21 @@ export async function createNewTask(data: any, actorId: string) {
   }
 
   // Notify assignee
-  await createNotification({
-    userId:  data.assignedToId,
-    title:   'New Task Assigned',
-    message: `You have been assigned task ${taskNo}`,
-    type:    'TASK_ASSIGNED',
-    link:    `/tasks/${task.id}`,
-  });
+  const notifyTaskAssigned = (await getConfig('notifyTaskAssigned', 'true')) === 'true';
+  if (notifyTaskAssigned) {
+    await createNotification({
+      userId:  data.assignedToId,
+      title:   'New Task Assigned',
+      message: `You have been assigned task ${taskNo}`,
+      type:    'TASK_ASSIGNED',
+      link:    `/tasks/${task.id}`,
+    });
+  }
 
   // Refetch to include the newly created SOP steps
-  return prisma.task.findUnique({ where: { id: task.id }, include: taskInclude });
+  const result = await prisma.task.findUnique({ where: { id: task.id }, include: taskInclude });
+  emitGlobal('task:updated', { action: 'create', task: result });
+  return result;
 }
 
 // ─── GET all tasks (role-filtered) ───────────────────────────────────────────
@@ -317,16 +324,20 @@ export async function updateTask(
 
     // 3. If a Manager/Admin marks as COMPLETED, notify the Assignee (Employee)
     if (data.status === TaskStatus.COMPLETED && actor.role !== Role.EMPLOYEE) {
-      await createNotification({
-        userId:  assigneeId,
-        title:   'Task Approved & Completed',
-        message: `Your work on task ${task.taskNo} has been approved and marked as completed.`,
-        type:    'TASK_COMPLETED',
-        link:    `/tasks/${id}`,
-      });
+      const notifyTaskCompleted = (await getConfig('notifyTaskCompleted', 'false')) === 'true';
+      if (notifyTaskCompleted) {
+        await createNotification({
+          userId:  assigneeId,
+          title:   'Task Approved & Completed',
+          message: `Your work on task ${task.taskNo} has been approved and marked as completed.`,
+          type:    'TASK_COMPLETED',
+          link:    `/tasks/${id}`,
+        });
+      }
     }
   }
 
+  emitGlobal('task:updated', { action: 'update', task: updated });
   return updated;
 }
 
@@ -421,6 +432,7 @@ export async function toggleSOPStep(
     }
   }
 
+  emitGlobal('task:updated', { action: 'toggleSOP', taskId });
   return updated;
 }
 
@@ -462,5 +474,7 @@ export async function deleteTask(id: string, actor: { id: string; role: string }
   }
 
   await getTaskById(id, actor);
-  return prisma.task.delete({ where: { id } });
+  const deleted = await prisma.task.delete({ where: { id } });
+  emitGlobal('task:updated', { action: 'delete', id });
+  return deleted;
 }

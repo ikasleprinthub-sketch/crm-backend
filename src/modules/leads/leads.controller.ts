@@ -55,6 +55,20 @@ export async function convertToTask(req: Request, res: Response, next: NextFunct
   }
 }
 
+export async function bulkImport(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { rows } = req.body;
+    if (!Array.isArray(rows) || rows.length === 0) {
+      res.status(400).json({ success: false, message: 'rows array is required' });
+      return;
+    }
+    const data = await svc.bulkImportLeads(rows);
+    res.status(201).json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function remove(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const actorRole = req.user!.role;

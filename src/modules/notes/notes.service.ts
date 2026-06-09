@@ -5,8 +5,16 @@ export async function getMyNotes(userId: string, role: string) {
   const include = { user: { select: { name: true } } };
   const orderBy: any = { createdAt: 'desc' };
 
+  const planExclusion = {
+    NOT: [
+      { title: { startsWith: 'Morning Plan —' } },
+      { title: { startsWith: 'Afternoon Plan —' } }
+    ]
+  };
+
   if (role === 'SUPER_ADMIN' || role === 'ADMIN') {
     return prisma.note.findMany({
+      where: planExclusion,
       include,
       orderBy,
     });
@@ -15,9 +23,14 @@ export async function getMyNotes(userId: string, role: string) {
   if (role === 'MANAGER') {
     return prisma.note.findMany({
       where: {
-        OR: [
-          { userId },
-          { user: { managerId: userId } }
+        AND: [
+          {
+            OR: [
+              { userId },
+              { user: { managerId: userId } }
+            ]
+          },
+          planExclusion
         ]
       },
       include,
@@ -26,7 +39,10 @@ export async function getMyNotes(userId: string, role: string) {
   }
 
   return prisma.note.findMany({
-    where: { userId },
+    where: {
+      userId,
+      ...planExclusion
+    },
     include,
     orderBy,
   });
