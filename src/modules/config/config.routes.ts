@@ -1,13 +1,13 @@
 import { Router } from 'express';
 import { protect } from '../../middleware/auth.middleware';
 import { requireAdmin } from '../../middleware/role.middleware';
-import * as ctrl from './sop.controller';
+import * as ctrl from './config.controller';
 
 const router = Router();
 
 router.use(protect);
-
-router.get('/:taskTypeId', ctrl.getTemplate);
-router.post('/:taskTypeId', requireAdmin, ctrl.saveTemplate);
+router.get('/',       ctrl.getConfigs);
+router.put('/',       requireAdmin, ctrl.updateConfig);
+router.put('/batch',  requireAdmin, ctrl.updateConfigBatch);
 
 export default router;

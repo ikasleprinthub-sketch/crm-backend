@@ -3,19 +3,35 @@ import { AppError } from '../../middleware/error.middleware';
 import { TaskStatus, Priority, Role } from '@prisma/client';
 import { createLog } from '../activity/activity.service';
 import { createNotification } from '../notifications/notifications.service';
+import { getConfig } from '../config/config.service';
+import { emitGlobal } from '../../lib/socket';
 
 // ─── Include shape ─────────────────────────────────────────────────────────────
 const taskInclude = {
-  lead:       { select: { id: true, leadNo: true, leadName: true } },
+  lead:       { select: { id: true, leadNo: true, leadName: true, contactNumber: true, email: true } },
   department: { select: { id: true, name: true } },
   taskType:   { select: { id: true, name: true } },
   assignedTo: { select: { id: true, name: true, email: true, role: true, managerId: true } },
-  sopSteps:   { orderBy: { order: 'asc' as const } },
+  sopSteps:   { 
+    orderBy: { order: 'asc' as const },
+    include: { completedBy: { select: { id: true, name: true } } }
+  },
 } as const;
 
 // ─── CREATE task ──────────────────────────────────────────────────────────────
 export async function createNewTask(data: any, actorId: string) {
   const taskNo = `T-${Date.now()}`;
+  
+  // Email validation
+  if (data.email) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(data.email)) {
+      throw new AppError('Invalid email format', 400);
+    }
+    if (data.email !== data.email.toLowerCase()) {
+      throw new AppError('Email must be in all lowercase letters (no capitals allowed)', 400);
+    }
+  }
   
   const task = await prisma.task.create({
     data: {
@@ -38,6 +54,14 @@ export async function createNewTask(data: any, actorId: string) {
       completionDate:data.completionDate ? (() => {
         const d = new Date(data.completionDate);
         if (isNaN(d.getTime())) throw new AppError('Invalid completion date format', 400);
+        
+        // Ensure completion date is not before start date
+        if (data.startDate) {
+          const start = new Date(data.startDate);
+          if (d < start) {
+            throw new AppError('Completion date cannot be before start date.', 400);
+          }
+        }
         return d;
       })() : undefined,
     },
@@ -51,27 +75,41 @@ export async function createNewTask(data: any, actorId: string) {
   });
 
   if (template && template.steps.length > 0) {
-    const steps = template.steps.map(s => ({
-      taskId: task.id,
-      title:  s.title,
-      order:  s.order,
-      isCompleted: false
-    }));
+    const steps = template.steps.map(s => {
+      let dueAt = null;
+      if (s.deadlineHours > 0) {
+        dueAt = new Date(Date.now() + s.deadlineHours * 60 * 60 * 1000);
+      }
+      return {
+        taskId: task.id,
+        title:  s.title,
+        order:  s.order,
+        isCompleted: false,
+        assignedRole: s.assignedRole,
+        deadlineHours: s.deadlineHours,
+        dueAt
+      };
+    });
 
     await prisma.taskSOPStep.createMany({ data: steps });
   }
 
   // Notify assignee
-  await createNotification({
-    userId:  data.assignedToId,
-    title:   'New Task Assigned',
-    message: `You have been assigned task ${taskNo}`,
-    type:    'TASK_ASSIGNED',
-    link:    `/tasks/${task.id}`,
-  });
+  const notifyTaskAssigned = (await getConfig('notifyTaskAssigned', 'true')) === 'true';
+  if (notifyTaskAssigned) {
+    await createNotification({
+      userId:  data.assignedToId,
+      title:   'New Task Assigned',
+      message: `You have been assigned task ${taskNo}`,
+      type:    'TASK_ASSIGNED',
+      link:    `/tasks/${task.id}`,
+    });
+  }
 
   // Refetch to include the newly created SOP steps
-  return prisma.task.findUnique({ where: { id: task.id }, include: taskInclude });
+  const result = await prisma.task.findUnique({ where: { id: task.id }, include: taskInclude });
+  emitGlobal('task:updated', { action: 'create', task: result });
+  return result;
 }
 
 // ─── GET all tasks (role-filtered) ───────────────────────────────────────────
@@ -167,6 +205,17 @@ export async function updateTask(
   actor: { id: string; role: string }
 ) {
   const task = await getTaskById(id, actor);
+  
+  // Email validation
+  if (data.email) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(data.email)) {
+      throw new AppError('Invalid email format', 400);
+    }
+    if (data.email !== data.email.toLowerCase()) {
+      throw new AppError('Email must be in all lowercase letters (no capitals allowed)', 400);
+    }
+  }
 
   // Only Admin/Manager can reassign
   if (data.assignedToId && actor.role === Role.EMPLOYEE) {
@@ -186,22 +235,28 @@ export async function updateTask(
       ? new Date(data.completionDate)
       : undefined;
 
+  // RESTRICTION: Admins/Managers cannot edit core fields once task is created.
+  // They can only change Status, Priority, and SOP Steps.
+  const isPrivileged = actor.role === Role.ADMIN || actor.role === Role.SUPER_ADMIN || actor.role === Role.MANAGER;
+  
+  if (isPrivileged) {
+    const coreFields = ['assignedToId', 'leadId', 'departmentId', 'taskTypeId', 'startDate', 'completionDate'];
+    const attemptedCoreEdits = Object.keys(data).filter(key => coreFields.includes(key));
+    
+    if (attemptedCoreEdits.length > 0) {
+      throw new AppError(`Admins/Managers cannot edit core task details (${attemptedCoreEdits.join(', ')}) after creation.`, 403);
+    }
+  }
+
   const updated = await prisma.task.update({
     where: { id },
     data: {
       ...(data.status        ? { status: data.status }               : {}),
       ...(data.priority      ? { priority: data.priority }           : {}),
-      ...(data.assignedToId  ? { assignedToId: data.assignedToId }   : {}),
       ...(data.remarks       !== undefined ? { remarks: data.remarks }           : {}),
       ...(data.contactName   !== undefined ? { contactName: data.contactName }   : {}),
       ...(data.contactNumber !== undefined ? { contactNumber: data.contactNumber } : {}),
       ...(data.email         !== undefined ? { email: data.email }               : {}),
-      ...(data.startDate     ? { startDate: (() => {
-        const d = new Date(data.startDate);
-        if (isNaN(d.getTime())) throw new AppError('Invalid start date format', 400);
-        return d;
-      })() } : {}),
-      ...(completionDate     ? { completionDate }                      : {}),
     },
     include: taskInclude,
   });
@@ -269,23 +324,28 @@ export async function updateTask(
 
     // 3. If a Manager/Admin marks as COMPLETED, notify the Assignee (Employee)
     if (data.status === TaskStatus.COMPLETED && actor.role !== Role.EMPLOYEE) {
-      await createNotification({
-        userId:  assigneeId,
-        title:   'Task Approved & Completed',
-        message: `Your work on task ${task.taskNo} has been approved and marked as completed.`,
-        type:    'TASK_COMPLETED',
-        link:    `/tasks/${id}`,
-      });
+      const notifyTaskCompleted = (await getConfig('notifyTaskCompleted', 'false')) === 'true';
+      if (notifyTaskCompleted) {
+        await createNotification({
+          userId:  assigneeId,
+          title:   'Task Approved & Completed',
+          message: `Your work on task ${task.taskNo} has been approved and marked as completed.`,
+          type:    'TASK_COMPLETED',
+          link:    `/tasks/${id}`,
+        });
+      }
     }
   }
 
+  emitGlobal('task:updated', { action: 'update', task: updated });
   return updated;
 }
 
-// ─── COMPLETE an SOP step ─────────────────────────────────────────────────────
-export async function completeSOPStep(
+// ─── TOGGLE an SOP step ──────────────────────────────────────────────────────
+export async function toggleSOPStep(
   taskId: string,
   stepId: string,
+  isCompleted: boolean,
   actor: { id: string; role: string }
 ) {
   await getTaskById(taskId, actor);
@@ -294,46 +354,104 @@ export async function completeSOPStep(
     where: { id: stepId, taskId },
   });
   if (!step) throw new AppError('SOP step not found on this task', 404);
-  if (step.isCompleted) throw new AppError('Step already completed', 400);
+
+  // 1. Role-Based Check
+  // Admins and Super Admins can toggle anything. 
+  // Managers can toggle Manager/Employee steps. 
+  // Employees can only toggle Employee steps.
+  const roleHierarchy: Record<string, number> = { 'EMPLOYEE': 1, 'MANAGER': 2, 'ADMIN': 3, 'SUPER_ADMIN': 4 };
+  const userRank = roleHierarchy[actor.role] || 0;
+  const stepRank = roleHierarchy[step.assignedRole] || 0;
+
+  if (userRank < stepRank && actor.role !== 'SUPER_ADMIN') {
+    throw new AppError(`Access Denied: This step requires ${step.assignedRole} role.`, 403);
+  }
+
+  // 2. Step Lock Logic (REMOVED as per request to allow flexible toggling)
+  /*
+  if (isCompleted) {
+    const previousStep = await prisma.taskSOPStep.findFirst({
+      where: { 
+        taskId, 
+        order: { lt: step.order } 
+      },
+      orderBy: { order: 'desc' }
+    });
+
+    if (previousStep && !previousStep.isCompleted) {
+      throw new AppError(`Workflow Lock: Please complete the previous step "${previousStep.title}" first.`, 400);
+    }
+  } else {
+    // If unchecking, ensure no FUTURE step is already completed
+    const nextStep = await prisma.taskSOPStep.findFirst({
+      where: { 
+        taskId, 
+        order: { gt: step.order },
+        isCompleted: true
+      },
+      orderBy: { order: 'asc' }
+    });
+
+    if (nextStep) {
+      throw new AppError(`Workflow Lock: Cannot undo "${step.title}" because the next step "${nextStep.title}" is already completed.`, 400);
+    }
+  }
+  */
 
   const updated = await prisma.taskSOPStep.update({
     where: { id: stepId },
-    data: { isCompleted: true, completedAt: new Date() },
+    data: { 
+      isCompleted, 
+      completedAt: isCompleted ? new Date() : null,
+      completedById: isCompleted ? actor.id : null
+    },
   });
 
   await createLog({
     userId: actor.id,
     taskId,
-    action: 'SOP_STEP_COMPLETED',
-    message: `Step "${step.title}" marked complete`,
+    action: isCompleted ? 'SOP_STEP_COMPLETED' : 'SOP_STEP_UNDO',
+    message: `Step "${step.title}" marked ${isCompleted ? 'complete' : 'incomplete'}`,
   });
 
-  // Auto-mark task PENDING_FOR_APPROVAL if all steps done
-  const remaining = await prisma.taskSOPStep.count({
-    where: { taskId, isCompleted: false },
-  });
-  if (remaining === 0) {
+  // ─── Automated Status Transitions ──────────────────────────────────────────
+  const totalSteps = await prisma.taskSOPStep.count({ where: { taskId } });
+  const completedSteps = await prisma.taskSOPStep.count({ where: { taskId, isCompleted: true } });
+  
+  if (completedSteps === totalSteps && totalSteps > 0) {
+    // 100% Done -> Pending Approval
     await updateTask(taskId, { status: TaskStatus.PENDING_FOR_APPROVAL }, actor);
+  } else if (completedSteps > 0) {
+    // 1% - 99% Done -> In Progress
+    await updateTask(taskId, { status: TaskStatus.WORK_IN_PROGRESS }, actor);
+  } else if (completedSteps === 0 && totalSteps > 0) {
+    // 0% Done -> Not Started (if it was WIP or Pending)
+    const currentTask = await prisma.task.findUnique({ where: { id: taskId } });
+    if (currentTask?.status === TaskStatus.WORK_IN_PROGRESS || currentTask?.status === TaskStatus.PENDING_FOR_APPROVAL) {
+      await updateTask(taskId, { status: TaskStatus.NOT_YET_STARTED }, actor);
+    }
   }
 
+  emitGlobal('task:updated', { action: 'toggleSOP', taskId });
   return updated;
 }
 
-// ─── UNDO an SOP step ─────────────────────────────────────────────────────────
+// ─── COMPLETE an SOP step (Deprecated in favor of toggle) ─────────────────────
+export async function completeSOPStep(
+  taskId: string,
+  stepId: string,
+  actor: { id: string; role: string }
+) {
+  return toggleSOPStep(taskId, stepId, true, actor);
+}
+
+// ─── UNDO an SOP step (Deprecated in favor of toggle) ─────────────────────────
 export async function undoSOPStep(
   taskId: string,
   stepId: string,
   actor: { id: string; role: string }
 ) {
-  await getTaskById(taskId, actor);
-
-  const step = await prisma.taskSOPStep.findFirst({ where: { id: stepId, taskId } });
-  if (!step) throw new AppError('SOP step not found on this task', 404);
-
-  return prisma.taskSOPStep.update({
-    where: { id: stepId },
-    data: { isCompleted: false, completedAt: null },
-  });
+  return toggleSOPStep(taskId, stepId, false, actor);
 }
 
 // ─── GET activity for a task ──────────────────────────────────────────────────
@@ -348,9 +466,15 @@ export async function getTaskActivity(taskId: string, actor: { id: string; role:
 }
 // ─── DELETE task ──────────────────────────────────────────────────────────────
 export async function deleteTask(id: string, actor: { id: string; role: string }) {
-  if (actor.role !== Role.SUPER_ADMIN) {
-    throw new AppError('Only administrators can delete tasks', 403);
+  if (actor.role !== Role.SUPER_ADMIN && actor.role !== Role.ADMIN) {
+    throw new AppError(
+      'Access Denied: You do not have sufficient permissions to delete tasks. This action is restricted to Admins and Super Admins.', 
+      403
+    );
   }
+
   await getTaskById(id, actor);
-  return prisma.task.delete({ where: { id } });
+  const deleted = await prisma.task.delete({ where: { id } });
+  emitGlobal('task:updated', { action: 'delete', id });
+  return deleted;
 }

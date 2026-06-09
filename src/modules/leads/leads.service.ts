@@ -1,7 +1,9 @@
 import { prisma } from '../../lib/prisma';
 import { AppError } from '../../middleware/error.middleware';
-import { LeadStatus } from '@prisma/client';
+import { LeadStatus, RecurrenceInterval } from '@prisma/client';
 import { createNotification } from '../notifications/notifications.service';
+import { getConfig } from '../config/config.service';
+import { emitGlobal } from '../../lib/socket';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 async function generateLeadNo(): Promise<string> {
@@ -87,6 +89,17 @@ export async function createLead(data: {
   if (!dept) throw new AppError('Department not found', 404);
   if (!tt)   throw new AppError('Task type not found', 404);
 
+  // Email validation
+  if (data.email) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(data.email)) {
+      throw new AppError('Invalid email format', 400);
+    }
+    if (data.email !== data.email.toLowerCase()) {
+      throw new AppError('Email must be in all lowercase letters (no capitals allowed)', 400);
+    }
+  }
+
   const leadNo = await generateLeadNo();
 
   const leadDate = data.date ? new Date(data.date) : new Date();
@@ -94,7 +107,7 @@ export async function createLead(data: {
     throw new AppError('Invalid date format provided for lead', 400);
   }
 
-  return prisma.lead.create({
+  const lead = await prisma.lead.create({
     data: {
       leadNo,
       date:          leadDate,
@@ -109,6 +122,9 @@ export async function createLead(data: {
     },
     include: leadInclude,
   });
+
+  emitGlobal('lead:updated', { action: 'create', lead });
+  return lead;
 }
 
 // ─── UPDATE lead ──────────────────────────────────────────────────────────────
@@ -128,7 +144,18 @@ export async function updateLead(
   }>
 ) {
   await getLeadById(id);
-  return prisma.lead.update({
+
+  // Email validation
+  if (data.email) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(data.email)) {
+      throw new AppError('Invalid email format', 400);
+    }
+    if (data.email !== data.email.toLowerCase()) {
+      throw new AppError('Email must be in all lowercase letters (no capitals allowed)', 400);
+    }
+  }
+  const updated = await prisma.lead.update({
     where: { id },
     data: {
       ...data,
@@ -140,6 +167,9 @@ export async function updateLead(
     },
     include: leadInclude,
   });
+
+  emitGlobal('lead:updated', { action: 'update', lead: updated });
+  return updated;
 }
 
 // ─── CONVERT lead → task ──────────────────────────────────────────────────────
@@ -150,6 +180,10 @@ export async function convertLeadToTask(
     remarks?: string;
     priority?: string;
     startDate?: string;
+    recurrence?: {
+      interval: RecurrenceInterval;
+      nextDueDate?: string;
+    };
   },
   actorId: string
 ) {
@@ -219,26 +253,157 @@ export async function convertLeadToTask(
       },
     });
 
-    // Notify assignee (Futuristic)
-    await createNotification({
-      userId:  data.assignedToId,
-      title:   'New Task Assigned',
-      message: `You have been assigned task ${taskNo} for ${lead.leadName}`,
-      type:    'TASK_ASSIGNED',
-      link:    `/tasks/${newTask.id}`,
-    });
+    // Notify assignee on lead conversion
+    const notifyLeadConverted = (await getConfig('notifyLeadConverted', 'true')) === 'true';
+    if (notifyLeadConverted) {
+      await createNotification({
+        userId:  data.assignedToId,
+        title:   'New Task Assigned',
+        message: `You have been assigned task ${taskNo} for ${lead.leadName}`,
+        type:    'TASK_ASSIGNED',
+        link:    `/tasks/${newTask.id}`,
+      });
+    }
+
+    // Create Recurrence Configuration if requested
+    if (data.recurrence) {
+      let nextDueDate = new Date();
+      if (data.recurrence.interval === 'MONTHLY') {
+        nextDueDate.setMonth(nextDueDate.getMonth() + 1);
+      } else if (data.recurrence.interval === 'QUARTERLY') {
+        nextDueDate.setMonth(nextDueDate.getMonth() + 3);
+      } else if (data.recurrence.interval === 'YEARLY') {
+        nextDueDate.setFullYear(nextDueDate.getFullYear() + 1);
+      } else if (data.recurrence.interval === 'CUSTOM') {
+        if (!data.recurrence.nextDueDate) {
+          throw new AppError('Custom next due date is required', 400);
+        }
+        nextDueDate = new Date(data.recurrence.nextDueDate);
+        if (isNaN(nextDueDate.getTime())) {
+          throw new AppError('Invalid custom next due date format', 400);
+        }
+      }
+
+      await tx.recurringTaskConfig.create({
+        data: {
+          leadId,
+          interval: data.recurrence.interval,
+          nextDueDate,
+          assignedToId: data.assignedToId,
+          remarks: data.remarks,
+        },
+      });
+    }
 
     return newTask;
   });
 
+  emitGlobal('lead:updated', { action: 'convert', leadId });
+  emitGlobal('task:updated', { action: 'create', task });
   return task;
 }
 
-// ─── DELETE lead ──────────────────────────────────────────────────────────────
-export async function deleteLead(id: string) {
-  const lead = await getLeadById(id);
-  if (lead.status === LeadStatus.CONVERTED) {
-    throw new AppError('Cannot delete a converted lead', 400);
+// ─── BULK IMPORT leads (NEW status) ──────────────────────────────────────────
+export async function bulkImportLeads(
+  rows: Array<{
+    leadName: string;
+    contactName?: string;
+    contactNumber?: string;
+    email?: string;
+    sourceId: string;
+    departmentId: string;
+    taskTypeId: string;
+    remarks?: string;
+  }>
+) {
+  const results: Array<{
+    row: number;
+    leadName: string;
+    status: 'success' | 'error';
+    leadNo?: string;
+    error?: string;
+  }> = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    try {
+      const lead = await createLead({
+        date: new Date().toISOString(),
+        sourceId: row.sourceId,
+        leadName: row.leadName,
+        contactName: row.contactName,
+        contactNumber: row.contactNumber,
+        email: row.email ? row.email.trim().toLowerCase() : undefined,
+        departmentId: row.departmentId,
+        taskTypeId: row.taskTypeId,
+        remarks: row.remarks,
+      });
+      results.push({ row: i + 1, leadName: row.leadName, status: 'success', leadNo: lead.leadNo });
+    } catch (err: any) {
+      results.push({ row: i + 1, leadName: row.leadName, status: 'error', error: err.message || 'Unknown error' });
+    }
   }
-  return prisma.lead.delete({ where: { id } });
+
+  const summary = {
+    total: rows.length,
+    success: results.filter(r => r.status === 'success').length,
+    failed: results.filter(r => r.status === 'error').length,
+  };
+
+  return { results, summary };
 }
+
+// ─── DELETE lead ──────────────────────────────────────────────────────────────
+export async function deleteLead(id: string, actorRole: string) {
+  console.log(`[LeadsService] deleteLead called for ID: ${id} by Role: ${actorRole}`);
+  
+  // Strict Permission Check: Only Super Admin and Admin can delete leads
+  if (actorRole !== 'SUPER_ADMIN' && actorRole !== 'ADMIN') {
+    console.log(`[LeadsService] Blocked: Lead deletion attempt by unauthorized role (${actorRole})`);
+    throw new AppError(
+      'Access Denied: You do not have sufficient permissions to delete lead records. This action is restricted to Admins and Super Admins.', 
+      403
+    );
+  }
+
+
+  const lead = await getLeadById(id);
+
+  try {
+    return await prisma.$transaction(async (tx) => {
+      // Find all tasks associated with this lead
+      const tasks = await tx.task.findMany({
+        where: { leadId: id },
+        select: { id: true }
+      });
+
+      if (tasks.length > 0) {
+        console.log(`[LeadsService] Found ${tasks.length} tasks linked to lead ${id}. Cascading deletion...`);
+        const taskIds = tasks.map(t => t.id);
+
+        // 1. Nullify task references in activity logs (preserving the logs)
+        await tx.activityLog.updateMany({
+          where: { taskId: { in: taskIds } },
+          data: { taskId: null }
+        });
+
+        // 2. Delete associated tasks (Comments and SOPSteps cascade in DB)
+        await tx.task.deleteMany({
+          where: { leadId: id }
+        });
+      }
+
+      // 3. Delete the lead itself
+      const result = await tx.lead.delete({ where: { id } });
+      console.log(`[LeadsService] Lead ${id} deleted successfully.`);
+      emitGlobal('lead:updated', { action: 'delete', id });
+      emitGlobal('task:updated', { action: 'delete_associated_with_lead', leadId: id });
+      return result;
+    });
+  } catch (error: any) {
+    if (error instanceof AppError) throw error;
+    console.error(`[LeadsService] Error deleting lead ${id}:`, error.message);
+    throw error;
+  }
+}
+

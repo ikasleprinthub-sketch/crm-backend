@@ -28,8 +28,11 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://crm_user:crm_pass@postgres:5432/crm_db
+      UPLOAD_DIR: /uploads
     ports:
       - '5000:5000'
+    volumes:
+      - D:/capnero-storage/uploads:/uploads
     depends_on:
       postgres:
         condition: service_healthy

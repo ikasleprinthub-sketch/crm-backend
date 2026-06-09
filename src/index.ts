@@ -1,4 +1,4 @@
-import './config/env'; // Validate env vars first — fail fast (Restarted: 2026-05-02 18:50)
+import './config/env'; // Validate env vars first — fail fast (Restarted: 2026-05-02 18:50) //hi
 import app from './app';
 import { env } from './config/env';
 import { logger } from './config/logger';
@@ -18,6 +18,10 @@ async function bootstrap() {
     // Initialize Socket.io
     const { initSocket } = await import('./lib/socket');
     initSocket(server);
+
+    // Start background jobs
+    const { startRecurringTasksJob } = await import('./jobs/recurringTasks');
+    startRecurringTasksJob();
 
     // ─── Graceful Shutdown ──────────────────────────────────────────────────── //
     const shutdown = async (signal: string) => {

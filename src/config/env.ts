@@ -10,6 +10,9 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),
   JWT_EXPIRES_IN: z.string().default('7d'),
   CORS_ORIGIN: z.string().default('http://localhost:3000'),
+  // Physical path where uploaded files are stored on disk.
+  // Dev default: <project-root>/uploads   Production: /var/www/uploads
+  UPLOAD_DIR: z.string().default(''),
 });
 
 const parsed = envSchema.safeParse(process.env);

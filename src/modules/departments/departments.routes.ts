@@ -7,10 +7,12 @@ const router = Router();
 
 router.use(authenticate);
 
-router.get('/',          ctrl.getAll);
-router.get('/:id',       ctrl.getOne);
-router.post('/',         requireAdmin, ctrl.create);
-router.put('/:id',       requireAdmin, ctrl.update);
-router.delete('/:id',    requireAdmin, ctrl.remove);
+router.get('/',                ctrl.getAll);
+router.get('/:id',             ctrl.getOne);
+router.get('/:id/stats',       ctrl.getStats);
+router.post('/',               requireAdmin, ctrl.create);
+router.put('/:id',             requireAdmin, ctrl.update);
+router.patch('/:id/status',    requireAdmin, ctrl.toggleStatus);
+router.delete('/:id',          requireAdmin, ctrl.remove);
 
 export default router;

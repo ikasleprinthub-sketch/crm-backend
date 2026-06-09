@@ -3,7 +3,7 @@ import * as svc from './notes.service';
 
 export async function getMy(req: Request, res: Response, next: NextFunction) {
   try {
-    const data = await svc.getMyNotes(req.user!.id);
+    const data = await svc.getMyNotes(req.user!.id, req.user!.role);
     res.json({ success: true, data });
   } catch (err) { next(err); }
 }

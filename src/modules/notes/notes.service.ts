@@ -1,10 +1,50 @@
 import { prisma } from '../../lib/prisma';
 import { AppError } from '../../middleware/error.middleware';
 
-export async function getMyNotes(userId: string) {
+export async function getMyNotes(userId: string, role: string) {
+  const include = { user: { select: { name: true } } };
+  const orderBy: any = { createdAt: 'desc' };
+
+  const planExclusion = {
+    NOT: [
+      { title: { startsWith: 'Morning Plan —' } },
+      { title: { startsWith: 'Afternoon Plan —' } }
+    ]
+  };
+
+  if (role === 'SUPER_ADMIN' || role === 'ADMIN') {
+    return prisma.note.findMany({
+      where: planExclusion,
+      include,
+      orderBy,
+    });
+  }
+
+  if (role === 'MANAGER') {
+    return prisma.note.findMany({
+      where: {
+        AND: [
+          {
+            OR: [
+              { userId },
+              { user: { managerId: userId } }
+            ]
+          },
+          planExclusion
+        ]
+      },
+      include,
+      orderBy,
+    });
+  }
+
   return prisma.note.findMany({
-    where: { userId },
-    orderBy: { updatedAt: 'desc' },
+    where: {
+      userId,
+      ...planExclusion
+    },
+    include,
+    orderBy,
   });
 }
 

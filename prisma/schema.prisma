@@ -34,47 +34,78 @@ model User {
   approvedBy    User?          @relation("ApproverToUsers", fields: [approvedById], references: [id])
   approvedUsers User[]         @relation("ApproverToUsers")
 
-  attendance          Attendance[] @relation("UserAttendance")
-  permissionsApproved Attendance[] @relation("PermissionApprover")
+  attendance            Attendance[]    @relation("UserAttendance")
+  permissionsApproved   Attendance[]    @relation("PermissionApprover")
+  correctionRequests    AttendanceCorrectionRequest[] @relation("UserCorrectionRequests")
+  correctionReviewed    AttendanceCorrectionRequest[] @relation("CorrectionReviewer")
+  attendanceAuditLogs   AttendanceAuditLog[]          @relation("AuditLogChangedBy")
+  sopStepsCompleted     TaskSOPStep[]   @relation("SOPStepCompletedBy")
+  uploadedLeadDocuments LeadDocument[]  @relation("LeadDocUploader")
+  uploadedTaskDocuments TaskDocument[]  @relation("TaskDocUploader")
+  recurringConfigs      RecurringTaskConfig[] @relation("UserRecurringConfigs")
 
   @@map("users")
 }
 
 model Department {
-  id        String     @id @default(uuid())
-  name      String     @unique
-  createdAt DateTime   @default(now())
-  leads     Lead[]
-  taskTypes TaskType[]
-  tasks     Task[]
+  id          String     @id @default(uuid())
+  name        String     @unique
+  code        String?    @unique
+  description String?
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  leads       Lead[]
+  taskTypes   TaskType[]
+  tasks       Task[]
 
   @@map("departments")
 }
 
 model TaskType {
-  id           String       @id @default(uuid())
-  name         String
-  departmentId String
-  createdAt    DateTime     @default(now())
-  leads        Lead[]
-  sopTemplate  SOPTemplate?
-  department   Department   @relation(fields: [departmentId], references: [id])
-  tasks        Task[]
+  id              String       @id @default(uuid())
+  name            String
+  departmentId    String
+  description     String?
+  slaDays         Int          @default(3)
+  defaultPriority Priority     @default(REGULAR)
+  isActive        Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  leads           Lead[]
+  sopTemplate     SOPTemplate?
+  department      Department   @relation(fields: [departmentId], references: [id])
+  tasks           Task[]
 
   @@map("task_types")
 }
 
 model SourceOfLead {
-  id    String @id @default(uuid())
-  name  String @unique
-  leads Lead[]
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  leads       Lead[]
 
   @@map("sources_of_lead")
 }
 
+model Client {
+  id           String         @id @default(uuid())
+  businessName String
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  leads        Lead[]
+  documents    LeadDocument[]
+
+  @@map("clients")
+}
+
 model Lead {
-  id            String       @id @default(uuid())
-  leadNo        String       @unique
+  id            String         @id @default(uuid())
+  leadNo        String         @unique
   date          DateTime
   sourceId      String
   leadName      String
@@ -84,20 +115,24 @@ model Lead {
   departmentId  String
   taskTypeId    String
   remarks       String?
-  status        LeadStatus   @default(NEW)
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  department    Department   @relation(fields: [departmentId], references: [id])
-  source        SourceOfLead @relation(fields: [sourceId], references: [id])
-  taskType      TaskType     @relation(fields: [taskTypeId], references: [id])
+  status        LeadStatus     @default(NEW)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  clientId      String?
+  client        Client?        @relation(fields: [clientId], references: [id])
+  department    Department     @relation(fields: [departmentId], references: [id])
+  source        SourceOfLead   @relation(fields: [sourceId], references: [id])
+  taskType      TaskType       @relation(fields: [taskTypeId], references: [id])
   tasks         Task[]
+  documents     LeadDocument[]
+  recurringConfig RecurringTaskConfig?
 
   @@map("leads")
 }
 
 model Task {
-  id             String        @id @default(uuid())
-  taskNo         String        @unique
+  id             String         @id @default(uuid())
+  taskNo         String         @unique
   leadId         String
   departmentId   String
   taskTypeId     String
@@ -106,19 +141,21 @@ model Task {
   contactNumber  String?
   email          String?
   assignedToId   String
-  status         TaskStatus    @default(NOT_YET_STARTED)
-  priority       Priority      @default(REGULAR)
+  status         TaskStatus     @default(NOT_YET_STARTED)
+  priority       Priority       @default(REGULAR)
   startDate      DateTime?
   completionDate DateTime?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  isAutomated    Boolean        @default(false)
   activityLogs   ActivityLog[]
   comments       Comment[]
   sopSteps       TaskSOPStep[]
-  assignedTo     User          @relation("TaskAssignedTo", fields: [assignedToId], references: [id])
-  department     Department    @relation(fields: [departmentId], references: [id])
-  lead           Lead          @relation(fields: [leadId], references: [id])
-  taskType       TaskType      @relation(fields: [taskTypeId], references: [id])
+  documents      TaskDocument[]
+  assignedTo     User           @relation("TaskAssignedTo", fields: [assignedToId], references: [id])
+  department     Department     @relation(fields: [departmentId], references: [id])
+  lead           Lead           @relation(fields: [leadId], references: [id])
+  taskType       TaskType       @relation(fields: [taskTypeId], references: [id])
 
   @@map("tasks")
 }
@@ -135,24 +172,31 @@ model SOPTemplate {
 }
 
 model SOPStep {
-  id         String      @id @default(uuid())
-  title      String
-  order      Int
-  templateId String
-  template   SOPTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  id            String      @id @default(uuid())
+  title         String
+  order         Int
+  assignedRole  Role        @default(EMPLOYEE)
+  deadlineHours Int         @default(0)
+  templateId    String
+  template      SOPTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
 
   @@map("sop_steps")
 }
 
 model TaskSOPStep {
-  id          String    @id @default(uuid())
-  taskId      String
-  title       String
-  order       Int
-  isCompleted Boolean   @default(false)
-  completedAt DateTime?
-  createdAt   DateTime  @default(now())
-  task        Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  id            String    @id @default(uuid())
+  taskId        String
+  title         String
+  order         Int
+  isCompleted   Boolean   @default(false)
+  completedAt   DateTime?
+  completedById String?
+  assignedRole  Role      @default(EMPLOYEE)
+  deadlineHours Int       @default(0)
+  dueAt         DateTime?
+  createdAt     DateTime  @default(now())
+  task          Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  completedBy   User?     @relation("SOPStepCompletedBy", fields: [completedById], references: [id])
 
   @@map("task_sop_steps")
 }
@@ -243,20 +287,30 @@ model Attendance {
   checkOut               DateTime?
   totalHours             Float?
   morningPlan            String?
+  afternoonPlan          String?
   dayCompletion          String?
   permission             PermissionStatus @default(NONE)
   permissionType         PermissionType?
   permissionReason       String?
   remarks                String?
   permissionApprovedById String?
+  checkInStatus          CheckInStatus?
   createdAt              DateTime         @default(now())
   updatedAt              DateTime         @updatedAt
 
   user                 User  @relation("UserAttendance", fields: [userId], references: [id])
   permissionApprovedBy User? @relation("PermissionApprover", fields: [permissionApprovedById], references: [id])
+  auditLogs            AttendanceAuditLog[]
+  correctionRequests   AttendanceCorrectionRequest[]
 
   @@unique([userId, date])
   @@map("attendance")
+}
+
+enum CheckInStatus {
+  ON_TIME
+  LATE
+  VERY_LATE
 }
 
 enum AttendanceStatus {
@@ -293,4 +347,127 @@ model Note {
   user      User     @relation(fields: [userId], references: [id])
 
   @@map("notes")
+}
+
+model SystemConfig {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("system_configs")
+}
+
+enum DocumentCategory {
+  AADHAR
+  PAN
+  GST
+  PHOTO
+  OTHER
+}
+
+model LeadDocument {
+  id           String           @id @default(uuid())
+  leadId       String
+  category     DocumentCategory
+  originalName String
+  savedName    String
+  filePath     String
+  mimeType     String
+  size         Int
+  clientId     String?
+  uploadedById String?
+  uploadedAt   DateTime         @default(now())
+  lead         Lead             @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  client       Client?          @relation(fields: [clientId], references: [id])
+  uploadedBy   User?            @relation("LeadDocUploader", fields: [uploadedById], references: [id])
+
+  @@map("lead_documents")
+}
+
+model TaskDocument {
+  id           String   @id @default(uuid())
+  taskId       String
+  originalName String
+  savedName    String
+  filePath     String
+  mimeType     String
+  size         Int
+  uploadedById String?
+  uploadedAt   DateTime @default(now())
+  task         Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploadedBy   User?    @relation("TaskDocUploader", fields: [uploadedById], references: [id])
+
+  @@map("task_documents")
+}
+
+enum RecurrenceInterval {
+  MONTHLY
+  QUARTERLY
+  YEARLY
+  CUSTOM
+}
+
+model AttendanceAuditLog {
+  id           String            @id @default(uuid())
+  attendanceId String
+  changedById  String
+  oldStatus    AttendanceStatus?
+  newStatus    AttendanceStatus?
+  oldCheckIn   DateTime?
+  newCheckIn   DateTime?
+  oldCheckOut  DateTime?
+  newCheckOut  DateTime?
+  reason       String?
+  createdAt    DateTime          @default(now())
+
+  attendance Attendance @relation(fields: [attendanceId], references: [id], onDelete: Cascade)
+  changedBy  User       @relation("AuditLogChangedBy", fields: [changedById], references: [id])
+
+  @@map("attendance_audit_logs")
+}
+
+model AttendanceCorrectionRequest {
+  id                String           @id @default(uuid())
+  userId            String
+  attendanceId      String?
+  date              DateTime         @db.Date
+  requestedStatus   AttendanceStatus
+  requestedCheckIn  DateTime?
+  requestedCheckOut DateTime?
+  reason            String
+  status            CorrectionStatus @default(PENDING)
+  reviewedById      String?
+  reviewNote        String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  user       User        @relation("UserCorrectionRequests", fields: [userId], references: [id])
+  attendance Attendance? @relation(fields: [attendanceId], references: [id])
+  reviewedBy User?       @relation("CorrectionReviewer", fields: [reviewedById], references: [id])
+
+  @@map("attendance_correction_requests")
+}
+
+enum CorrectionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model RecurringTaskConfig {
+  id           String             @id @default(uuid())
+  leadId       String             @unique
+  lead         Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  interval     RecurrenceInterval
+  nextDueDate  DateTime
+  assignedToId String
+  assignedTo   User               @relation("UserRecurringConfigs", fields: [assignedToId], references: [id])
+  remarks      String?
+  isActive     Boolean            @default(true)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  @@map("recurring_task_configs")
 }

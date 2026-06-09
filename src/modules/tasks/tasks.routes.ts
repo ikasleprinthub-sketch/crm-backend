@@ -12,10 +12,10 @@ router.get('/',    ctrl.getAll);
 router.post('/',   requireManager, ctrl.create);
 router.get('/:id', ctrl.getOne);
 router.patch('/:id', ctrl.update);
-router.delete('/:id', requireAdmin, ctrl.remove);
+router.delete('/:id', requireManager, ctrl.remove);
 
 // SOP Steps
-router.patch('/:id/sop/:stepId', ctrl.completeStep);
+router.patch('/:id/sop/:stepId', ctrl.toggleStep);
 
 // Task activity log
 router.get('/:id/activity', ctrl.getActivity);

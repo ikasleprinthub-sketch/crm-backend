@@ -10,8 +10,9 @@ router.use(protect);
 router.get('/',                  requireManager, ctrl.getAll);
 router.get('/:id',               ctrl.getOne);
 router.post('/',                 requireManager, ctrl.create);
+router.post('/bulk-import',      requireManager, ctrl.bulkImport);
 router.patch('/:id',             requireManager, ctrl.update);
 router.post('/:id/convert',      requireManager, ctrl.convertToTask);
-router.delete('/:id',            requireAdmin,   ctrl.remove);
+router.delete('/:id',            requireManager, ctrl.remove);
 
 export default router;
