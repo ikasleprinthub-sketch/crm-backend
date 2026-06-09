@@ -2,6 +2,8 @@ import { prisma } from '../../lib/prisma';
 import { AppError } from '../../middleware/error.middleware';
 import { LeadStatus, RecurrenceInterval } from '@prisma/client';
 import { createNotification } from '../notifications/notifications.service';
+import { getConfig } from '../config/config.service';
+import { emitGlobal } from '../../lib/socket';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 async function generateLeadNo(): Promise<string> {
@@ -105,7 +107,7 @@ export async function createLead(data: {
     throw new AppError('Invalid date format provided for lead', 400);
   }
 
-  return prisma.lead.create({
+  const lead = await prisma.lead.create({
     data: {
       leadNo,
       date:          leadDate,
@@ -120,6 +122,9 @@ export async function createLead(data: {
     },
     include: leadInclude,
   });
+
+  emitGlobal('lead:updated', { action: 'create', lead });
+  return lead;
 }
 
 // ─── UPDATE lead ──────────────────────────────────────────────────────────────
@@ -150,7 +155,7 @@ export async function updateLead(
       throw new AppError('Email must be in all lowercase letters (no capitals allowed)', 400);
     }
   }
-  return prisma.lead.update({
+  const updated = await prisma.lead.update({
     where: { id },
     data: {
       ...data,
@@ -162,6 +167,9 @@ export async function updateLead(
     },
     include: leadInclude,
   });
+
+  emitGlobal('lead:updated', { action: 'update', lead: updated });
+  return updated;
 }
 
 // ─── CONVERT lead → task ──────────────────────────────────────────────────────
@@ -245,14 +253,17 @@ export async function convertLeadToTask(
       },
     });
 
-    // Notify assignee (Futuristic)
-    await createNotification({
-      userId:  data.assignedToId,
-      title:   'New Task Assigned',
-      message: `You have been assigned task ${taskNo} for ${lead.leadName}`,
-      type:    'TASK_ASSIGNED',
-      link:    `/tasks/${newTask.id}`,
-    });
+    // Notify assignee on lead conversion
+    const notifyLeadConverted = (await getConfig('notifyLeadConverted', 'true')) === 'true';
+    if (notifyLeadConverted) {
+      await createNotification({
+        userId:  data.assignedToId,
+        title:   'New Task Assigned',
+        message: `You have been assigned task ${taskNo} for ${lead.leadName}`,
+        type:    'TASK_ASSIGNED',
+        link:    `/tasks/${newTask.id}`,
+      });
+    }
 
     // Create Recurrence Configuration if requested
     if (data.recurrence) {
@@ -287,7 +298,59 @@ export async function convertLeadToTask(
     return newTask;
   });
 
+  emitGlobal('lead:updated', { action: 'convert', leadId });
+  emitGlobal('task:updated', { action: 'create', task });
   return task;
+}
+
+// ─── BULK IMPORT leads (NEW status) ──────────────────────────────────────────
+export async function bulkImportLeads(
+  rows: Array<{
+    leadName: string;
+    contactName?: string;
+    contactNumber?: string;
+    email?: string;
+    sourceId: string;
+    departmentId: string;
+    taskTypeId: string;
+    remarks?: string;
+  }>
+) {
+  const results: Array<{
+    row: number;
+    leadName: string;
+    status: 'success' | 'error';
+    leadNo?: string;
+    error?: string;
+  }> = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    try {
+      const lead = await createLead({
+        date: new Date().toISOString(),
+        sourceId: row.sourceId,
+        leadName: row.leadName,
+        contactName: row.contactName,
+        contactNumber: row.contactNumber,
+        email: row.email ? row.email.trim().toLowerCase() : undefined,
+        departmentId: row.departmentId,
+        taskTypeId: row.taskTypeId,
+        remarks: row.remarks,
+      });
+      results.push({ row: i + 1, leadName: row.leadName, status: 'success', leadNo: lead.leadNo });
+    } catch (err: any) {
+      results.push({ row: i + 1, leadName: row.leadName, status: 'error', error: err.message || 'Unknown error' });
+    }
+  }
+
+  const summary = {
+    total: rows.length,
+    success: results.filter(r => r.status === 'success').length,
+    failed: results.filter(r => r.status === 'error').length,
+  };
+
+  return { results, summary };
 }
 
 // ─── DELETE lead ──────────────────────────────────────────────────────────────
@@ -333,6 +396,8 @@ export async function deleteLead(id: string, actorRole: string) {
       // 3. Delete the lead itself
       const result = await tx.lead.delete({ where: { id } });
       console.log(`[LeadsService] Lead ${id} deleted successfully.`);
+      emitGlobal('lead:updated', { action: 'delete', id });
+      emitGlobal('task:updated', { action: 'delete_associated_with_lead', leadId: id });
       return result;
     });
   } catch (error: any) {

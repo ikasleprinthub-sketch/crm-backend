@@ -6,7 +6,8 @@ import * as ctrl from './config.controller';
 const router = Router();
 
 router.use(protect);
-router.get('/', ctrl.getConfigs);
-router.put('/', requireAdmin, ctrl.updateConfig);
+router.get('/',       ctrl.getConfigs);
+router.put('/',       requireAdmin, ctrl.updateConfig);
+router.put('/batch',  requireAdmin, ctrl.updateConfigBatch);
 
 export default router;

@@ -1,3 +1,4 @@
+import { Priority } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { AppError } from '../../middleware/error.middleware';
 import { createLog } from '../activity/activity.service';
@@ -20,13 +21,23 @@ export async function getTaskTypeById(id: string) {
     include: {
       department: true,
       sopTemplate: { include: { steps: { orderBy: { order: 'asc' } } } },
+      _count: { select: { leads: true, tasks: true } },
     },
   });
   if (!tt) throw new AppError('Task type not found', 404);
   return tt;
 }
 
-export async function createTaskType(data: { name: string; departmentId: string }, actorId: string) {
+export async function createTaskType(
+  data: {
+    name: string;
+    departmentId: string;
+    description?: string;
+    slaDays?: number;
+    defaultPriority?: Priority;
+  },
+  actorId: string
+) {
   const name = data.name.trim();
   if (!name) throw new AppError('Task type name is required', 400);
 
@@ -34,22 +45,38 @@ export async function createTaskType(data: { name: string; departmentId: string 
   if (!dept) throw new AppError('Department not found', 404);
 
   const tt = await prisma.taskType.create({
-    data: { name, departmentId: data.departmentId },
+    data: {
+      name,
+      departmentId: data.departmentId,
+      description: data.description?.trim() || null,
+      slaDays: data.slaDays ?? 3,
+      defaultPriority: data.defaultPriority ?? 'REGULAR',
+    },
     include: { department: { select: { id: true, name: true } } },
   });
 
   await createLog({
     userId: actorId,
     action: 'TASK_TYPE_CREATED',
-    message: `Task Type "${name}" created in department "${dept.name}"`,
+    message: `Task Type "${name}" created in "${dept.name}"`,
   });
 
   return tt;
 }
 
-export async function updateTaskType(id: string, data: { name?: string; departmentId?: string }, actorId: string) {
+export async function updateTaskType(
+  id: string,
+  data: {
+    name?: string;
+    departmentId?: string;
+    description?: string;
+    slaDays?: number;
+    defaultPriority?: Priority;
+  },
+  actorId: string
+) {
   const tt = await getTaskTypeById(id);
-  
+
   const name = data.name?.trim();
   if (name === '') throw new AppError('Name cannot be empty', 400);
 
@@ -63,6 +90,9 @@ export async function updateTaskType(id: string, data: { name?: string; departme
     data: {
       ...(name ? { name } : {}),
       ...(data.departmentId ? { departmentId: data.departmentId } : {}),
+      ...(data.description !== undefined ? { description: data.description.trim() || null } : {}),
+      ...(data.slaDays !== undefined ? { slaDays: data.slaDays } : {}),
+      ...(data.defaultPriority !== undefined ? { defaultPriority: data.defaultPriority } : {}),
     },
     include: { department: { select: { id: true, name: true } } },
   });
@@ -70,7 +100,36 @@ export async function updateTaskType(id: string, data: { name?: string; departme
   await createLog({
     userId: actorId,
     action: 'TASK_TYPE_UPDATED',
-    message: `Task Type "${tt.name}" was modified`,
+    message: `Task Type "${tt.name}" updated`,
+  });
+
+  return updated;
+}
+
+export async function toggleTaskTypeStatus(id: string, actorId: string) {
+  const tt = await getTaskTypeById(id);
+
+  if (tt.isActive) {
+    const activeTaskCount = await prisma.task.count({
+      where: { taskTypeId: id, status: { not: 'COMPLETED' } },
+    });
+    if (activeTaskCount > 0) {
+      throw new AppError(
+        `Cannot disable "${tt.name}". It has ${activeTaskCount} active tasks.`,
+        400
+      );
+    }
+  }
+
+  const updated = await prisma.taskType.update({
+    where: { id },
+    data: { isActive: !tt.isActive },
+  });
+
+  await createLog({
+    userId: actorId,
+    action: 'TASK_TYPE_UPDATED',
+    message: `Task Type "${tt.name}" ${updated.isActive ? 'enabled' : 'disabled'}`,
   });
 
   return updated;
@@ -78,7 +137,7 @@ export async function updateTaskType(id: string, data: { name?: string; departme
 
 export async function deleteTaskType(id: string, actorId: string) {
   const tt = await getTaskTypeById(id);
-  
+
   const [taskCount, leadCount, sopCount] = await Promise.all([
     prisma.task.count({ where: { taskTypeId: id } }),
     prisma.lead.count({ where: { taskTypeId: id } }),
@@ -94,11 +153,7 @@ export async function deleteTaskType(id: string, actorId: string) {
 
   await prisma.taskType.delete({ where: { id } });
 
-  await createLog({
-    userId: actorId,
-    action: 'TASK_TYPE_DELETED',
-    message: `Task Type "${tt.name}" was deleted`,
-  });
+  await createLog({ userId: actorId, action: 'TASK_TYPE_DELETED', message: `Task Type "${tt.name}" deleted` });
 
   return { success: true };
 }

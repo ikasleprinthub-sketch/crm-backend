@@ -36,6 +36,9 @@ model User {
 
   attendance            Attendance[]    @relation("UserAttendance")
   permissionsApproved   Attendance[]    @relation("PermissionApprover")
+  correctionRequests    AttendanceCorrectionRequest[] @relation("UserCorrectionRequests")
+  correctionReviewed    AttendanceCorrectionRequest[] @relation("CorrectionReviewer")
+  attendanceAuditLogs   AttendanceAuditLog[]          @relation("AuditLogChangedBy")
   sopStepsCompleted     TaskSOPStep[]   @relation("SOPStepCompletedBy")
   uploadedLeadDocuments LeadDocument[]  @relation("LeadDocUploader")
   uploadedTaskDocuments TaskDocument[]  @relation("TaskDocUploader")
@@ -45,33 +48,46 @@ model User {
 }
 
 model Department {
-  id        String     @id @default(uuid())
-  name      String     @unique
-  createdAt DateTime   @default(now())
-  leads     Lead[]
-  taskTypes TaskType[]
-  tasks     Task[]
+  id          String     @id @default(uuid())
+  name        String     @unique
+  code        String?    @unique
+  description String?
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  leads       Lead[]
+  taskTypes   TaskType[]
+  tasks       Task[]
 
   @@map("departments")
 }
 
 model TaskType {
-  id           String       @id @default(uuid())
-  name         String
-  departmentId String
-  createdAt    DateTime     @default(now())
-  leads        Lead[]
-  sopTemplate  SOPTemplate?
-  department   Department   @relation(fields: [departmentId], references: [id])
-  tasks        Task[]
+  id              String       @id @default(uuid())
+  name            String
+  departmentId    String
+  description     String?
+  slaDays         Int          @default(3)
+  defaultPriority Priority     @default(REGULAR)
+  isActive        Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  leads           Lead[]
+  sopTemplate     SOPTemplate?
+  department      Department   @relation(fields: [departmentId], references: [id])
+  tasks           Task[]
 
   @@map("task_types")
 }
 
 model SourceOfLead {
-  id    String @id @default(uuid())
-  name  String @unique
-  leads Lead[]
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  leads       Lead[]
 
   @@map("sources_of_lead")
 }
@@ -278,14 +294,23 @@ model Attendance {
   permissionReason       String?
   remarks                String?
   permissionApprovedById String?
+  checkInStatus          CheckInStatus?
   createdAt              DateTime         @default(now())
   updatedAt              DateTime         @updatedAt
 
   user                 User  @relation("UserAttendance", fields: [userId], references: [id])
   permissionApprovedBy User? @relation("PermissionApprover", fields: [permissionApprovedById], references: [id])
+  auditLogs            AttendanceAuditLog[]
+  correctionRequests   AttendanceCorrectionRequest[]
 
   @@unique([userId, date])
   @@map("attendance")
+}
+
+enum CheckInStatus {
+  ON_TIME
+  LATE
+  VERY_LATE
 }
 
 enum AttendanceStatus {
@@ -382,6 +407,53 @@ enum RecurrenceInterval {
   QUARTERLY
   YEARLY
   CUSTOM
+}
+
+model AttendanceAuditLog {
+  id           String            @id @default(uuid())
+  attendanceId String
+  changedById  String
+  oldStatus    AttendanceStatus?
+  newStatus    AttendanceStatus?
+  oldCheckIn   DateTime?
+  newCheckIn   DateTime?
+  oldCheckOut  DateTime?
+  newCheckOut  DateTime?
+  reason       String?
+  createdAt    DateTime          @default(now())
+
+  attendance Attendance @relation(fields: [attendanceId], references: [id], onDelete: Cascade)
+  changedBy  User       @relation("AuditLogChangedBy", fields: [changedById], references: [id])
+
+  @@map("attendance_audit_logs")
+}
+
+model AttendanceCorrectionRequest {
+  id                String           @id @default(uuid())
+  userId            String
+  attendanceId      String?
+  date              DateTime         @db.Date
+  requestedStatus   AttendanceStatus
+  requestedCheckIn  DateTime?
+  requestedCheckOut DateTime?
+  reason            String
+  status            CorrectionStatus @default(PENDING)
+  reviewedById      String?
+  reviewNote        String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  user       User        @relation("UserCorrectionRequests", fields: [userId], references: [id])
+  attendance Attendance? @relation(fields: [attendanceId], references: [id])
+  reviewedBy User?       @relation("CorrectionReviewer", fields: [reviewedById], references: [id])
+
+  @@map("attendance_correction_requests")
+}
+
+enum CorrectionStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 model RecurringTaskConfig {

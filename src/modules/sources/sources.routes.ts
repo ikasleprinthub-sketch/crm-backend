@@ -7,9 +7,12 @@ const router = Router();
 
 router.use(authenticate);
 
-router.get('/',        ctrl.getAll);
-router.post('/',       requireAdmin, ctrl.create);
-router.put('/:id',     requireAdmin, ctrl.update);
-router.delete('/:id',  requireAdmin, ctrl.remove);
+router.get('/',             ctrl.getAll);
+router.get('/analytics',    ctrl.getAnalytics);
+router.get('/:id/analytics', ctrl.getOneAnalytics);
+router.post('/',            requireAdmin, ctrl.create);
+router.put('/:id',          requireAdmin, ctrl.update);
+router.patch('/:id/status', requireAdmin, ctrl.toggleStatus);
+router.delete('/:id',       requireAdmin, ctrl.remove);
 
 export default router;
