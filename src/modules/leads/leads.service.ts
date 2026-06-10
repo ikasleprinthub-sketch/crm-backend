@@ -7,6 +7,19 @@ import { emitGlobal } from '../../lib/socket';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 async function generateLeadNo(): Promise<string> {
+  const latestLead = await prisma.lead.findFirst({
+    where: { leadNo: { startsWith: 'LEAD-' } },
+    orderBy: { leadNo: 'desc' },
+    select: { leadNo: true },
+  });
+
+  if (!latestLead?.leadNo) return 'LEAD-0001';
+
+  const match = latestLead.leadNo.match(/LEAD-(\d+)/);
+  if (match?.[1]) {
+    return `LEAD-${String(parseInt(match[1], 10) + 1).padStart(4, '0')}`;
+  }
+
   const count = await prisma.lead.count();
   return `LEAD-${String(count + 1).padStart(4, '0')}`;
 }
@@ -100,28 +113,40 @@ export async function createLead(data: {
     }
   }
 
-  const leadNo = await generateLeadNo();
-
   const leadDate = data.date ? new Date(data.date) : new Date();
   if (isNaN(leadDate.getTime())) {
     throw new AppError('Invalid date format provided for lead', 400);
   }
 
-  const lead = await prisma.lead.create({
-    data: {
-      leadNo,
-      date:          leadDate,
-      sourceId:      data.sourceId,
-      leadName:      data.leadName,
-      contactName:   data.contactName,
-      contactNumber: data.contactNumber,
-      email:         data.email,
-      departmentId:  data.departmentId,
-      taskTypeId:    data.taskTypeId,
-      remarks:       data.remarks,
-    },
-    include: leadInclude,
-  });
+  let lead;
+  let attempts = 0;
+  while (true) {
+    const leadNo = await generateLeadNo();
+    try {
+      lead = await prisma.lead.create({
+        data: {
+          leadNo,
+          date:          leadDate,
+          sourceId:      data.sourceId,
+          leadName:      data.leadName,
+          contactName:   data.contactName,
+          contactNumber: data.contactNumber,
+          email:         data.email,
+          departmentId:  data.departmentId,
+          taskTypeId:    data.taskTypeId,
+          remarks:       data.remarks,
+        },
+        include: leadInclude,
+      });
+      break;
+    } catch (err: any) {
+      if (err?.code === 'P2002' && err?.meta?.target?.includes('leadNo') && attempts < 3) {
+        attempts++;
+        continue;
+      }
+      throw err;
+    }
+  }
 
   emitGlobal('lead:updated', { action: 'create', lead });
   return lead;
