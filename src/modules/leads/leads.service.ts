@@ -5,7 +5,7 @@ import { createNotification } from '../notifications/notifications.service';
 import { getConfig } from '../config/config.service';
 import { emitGlobal } from '../../lib/socket';
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Helpers ────────────────────────────────────────────────────────────────── //
 async function generateLeadNo(): Promise<string> {
   const latestLead = await prisma.lead.findFirst({
     where: { leadNo: { startsWith: 'LEAD-' } },
@@ -25,10 +25,10 @@ async function generateLeadNo(): Promise<string> {
 }
 
 const leadInclude = {
-  source:     { select: { id: true, name: true } },
+  source: { select: { id: true, name: true } },
   department: { select: { id: true, name: true } },
-  taskType:   { select: { id: true, name: true } },
-  tasks:      { select: { id: true, taskNo: true, status: true, priority: true } },
+  taskType: { select: { id: true, name: true } },
+  tasks: { select: { id: true, taskNo: true, status: true, priority: true } },
 } as const;
 
 // ─── GET all leads ────────────────────────────────────────────────────────────
@@ -44,18 +44,18 @@ export async function getAllLeads(opts: {
   const skip = (page - 1) * limit;
 
   const where = {
-    ...(status       ? { status }       : {}),
+    ...(status ? { status } : {}),
     ...(departmentId ? { departmentId } : {}),
-    ...(sourceId     ? { sourceId }     : {}),
+    ...(sourceId ? { sourceId } : {}),
     ...(search
       ? {
-          OR: [
-            { leadName:    { contains: search, mode: 'insensitive' as const } },
-            { contactName: { contains: search, mode: 'insensitive' as const } },
-            { email:       { contains: search, mode: 'insensitive' as const } },
-            { leadNo:      { contains: search, mode: 'insensitive' as const } },
-          ],
-        }
+        OR: [
+          { leadName: { contains: search, mode: 'insensitive' as const } },
+          { contactName: { contains: search, mode: 'insensitive' as const } },
+          { email: { contains: search, mode: 'insensitive' as const } },
+          { leadNo: { contains: search, mode: 'insensitive' as const } },
+        ],
+      }
       : {}),
   };
 
@@ -98,9 +98,9 @@ export async function createLead(data: {
     prisma.department.findUnique({ where: { id: data.departmentId } }),
     prisma.taskType.findUnique({ where: { id: data.taskTypeId } }),
   ]);
-  if (!src)  throw new AppError('Source not found', 404);
+  if (!src) throw new AppError('Source not found', 404);
   if (!dept) throw new AppError('Department not found', 404);
-  if (!tt)   throw new AppError('Task type not found', 404);
+  if (!tt) throw new AppError('Task type not found', 404);
 
   // Email validation
   if (data.email) {
@@ -126,15 +126,15 @@ export async function createLead(data: {
       lead = await prisma.lead.create({
         data: {
           leadNo,
-          date:          leadDate,
-          sourceId:      data.sourceId,
-          leadName:      data.leadName,
-          contactName:   data.contactName,
+          date: leadDate,
+          sourceId: data.sourceId,
+          leadName: data.leadName,
+          contactName: data.contactName,
           contactNumber: data.contactNumber,
-          email:         data.email,
-          departmentId:  data.departmentId,
-          taskTypeId:    data.taskTypeId,
-          remarks:       data.remarks,
+          email: data.email,
+          departmentId: data.departmentId,
+          taskTypeId: data.taskTypeId,
+          remarks: data.remarks,
         },
         include: leadInclude,
       });
@@ -228,8 +228,8 @@ export async function convertLeadToTask(
     // Log activity
     await tx.activityLog.create({
       data: {
-        userId:  actorId,
-        action:  'LEAD_CONVERTED',
+        userId: actorId,
+        action: 'LEAD_CONVERTED',
         message: `Lead ${lead.leadNo} converted.`,
       },
     });
@@ -327,12 +327,12 @@ export async function bulkImportLeads(
 // ─── DELETE lead ──────────────────────────────────────────────────────────────
 export async function deleteLead(id: string, actorRole: string) {
   console.log(`[LeadsService] deleteLead called for ID: ${id} by Role: ${actorRole}`);
-  
+
   // Strict Permission Check: Only Super Admin and Admin can delete leads
   if (actorRole !== 'SUPER_ADMIN' && actorRole !== 'ADMIN') {
     console.log(`[LeadsService] Blocked: Lead deletion attempt by unauthorized role (${actorRole})`);
     throw new AppError(
-      'Access Denied: You do not have sufficient permissions to delete lead records. This action is restricted to Admins and Super Admins.', 
+      'Access Denied: You do not have sufficient permissions to delete lead records. This action is restricted to Admins and Super Admins.',
       403
     );
   }
