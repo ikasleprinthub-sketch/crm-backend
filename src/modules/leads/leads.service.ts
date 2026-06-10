@@ -218,52 +218,9 @@ export async function convertLeadToTask(
     throw new AppError('Lead is already converted', 400);
   }
 
-  // Validate assignee
-  const assignee = await prisma.user.findUnique({ where: { id: data.assignedToId } });
-  if (!assignee) throw new AppError('Assigned user not found', 404);
-
-  // Generate task number
-  const taskCount = await prisma.task.count();
-  const taskNo = `TASK-${String(taskCount + 1).padStart(4, '0')}`;
-
-  // Fetch SOP template if exists
-  const sopTemplate = await prisma.sOPTemplate.findUnique({
-    where: { taskTypeId: lead.taskTypeId },
-    include: { steps: { orderBy: { order: 'asc' } } },
-  });
-
-  const task = await prisma.$transaction(async (tx) => {
-    // Create task
-    const newTask = await tx.task.create({
-      data: {
-        taskNo,
-        leadId:        leadId,
-        departmentId:  lead.departmentId,
-        taskTypeId:    lead.taskTypeId,
-        contactName:   lead.contactName,
-        contactNumber: lead.contactNumber,
-        email:         lead.email,
-        assignedToId:  data.assignedToId,
-        remarks:       data.remarks ?? lead.remarks,
-        priority:      (data.priority as any) ?? 'REGULAR',
-        startDate:     data.startDate ? (() => {
-          const d = new Date(data.startDate);
-          if (isNaN(d.getTime())) throw new AppError('Invalid start date format', 400);
-          return d;
-        })() : undefined,
-        sopSteps: sopTemplate
-          ? {
-              create: sopTemplate.steps.map((s) => ({
-                title: s.title,
-                order: s.order,
-              })),
-            }
-          : undefined,
-      },
-    });
-
+  const updatedLead = await prisma.$transaction(async (tx) => {
     // Mark lead as CONVERTED
-    await tx.lead.update({
+    const updated = await tx.lead.update({
       where: { id: leadId },
       data: { status: LeadStatus.CONVERTED },
     });
@@ -272,33 +229,23 @@ export async function convertLeadToTask(
     await tx.activityLog.create({
       data: {
         userId:  actorId,
-        taskId:  newTask.id,
         action:  'LEAD_CONVERTED',
-        message: `Lead ${lead.leadNo} converted to task ${taskNo} and assigned to ${assignee.name}`,
+        message: `Lead ${lead.leadNo} converted.`,
       },
     });
 
-    // Notify assignee on lead conversion
-    const notifyLeadConverted = (await getConfig('notifyLeadConverted', 'true')) === 'true';
-    if (notifyLeadConverted) {
-      await createNotification({
-        userId:  data.assignedToId,
-        title:   'New Task Assigned',
-        message: `You have been assigned task ${taskNo} for ${lead.leadName}`,
-        type:    'TASK_ASSIGNED',
-        link:    `/tasks/${newTask.id}`,
-      });
-    }
-
     // Create Recurrence Configuration if requested
-    if (data.recurrence) {
+    if (data.recurrence && data.recurrence.interval !== 'NONE' as any) {
       let nextDueDate = new Date();
+      nextDueDate.setHours(0, 0, 0, 0); // Start of day
+
       if (data.recurrence.interval === 'MONTHLY') {
-        nextDueDate.setMonth(nextDueDate.getMonth() + 1);
+        nextDueDate = new Date(nextDueDate.getFullYear(), nextDueDate.getMonth() + 1, 1);
       } else if (data.recurrence.interval === 'QUARTERLY') {
-        nextDueDate.setMonth(nextDueDate.getMonth() + 3);
+        const currentQuarter = Math.floor(nextDueDate.getMonth() / 3);
+        nextDueDate = new Date(nextDueDate.getFullYear(), (currentQuarter + 1) * 3, 1);
       } else if (data.recurrence.interval === 'YEARLY') {
-        nextDueDate.setFullYear(nextDueDate.getFullYear() + 1);
+        nextDueDate = new Date(nextDueDate.getFullYear() + 1, 0, 1);
       } else if (data.recurrence.interval === 'CUSTOM') {
         if (!data.recurrence.nextDueDate) {
           throw new AppError('Custom next due date is required', 400);
@@ -320,12 +267,11 @@ export async function convertLeadToTask(
       });
     }
 
-    return newTask;
+    return updated;
   });
 
   emitGlobal('lead:updated', { action: 'convert', leadId });
-  emitGlobal('task:updated', { action: 'create', task });
-  return task;
+  return updatedLead;
 }
 
 // ─── BULK IMPORT leads (NEW status) ──────────────────────────────────────────
