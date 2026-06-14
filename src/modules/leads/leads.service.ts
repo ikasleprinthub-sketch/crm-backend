@@ -256,15 +256,32 @@ export async function convertLeadToTask(
         }
       }
 
-      await tx.recurringTaskConfig.create({
-        data: {
-          leadId,
-          interval: data.recurrence.interval,
-          nextDueDate,
-          assignedToId: data.assignedToId,
-          remarks: data.remarks,
-        },
+      const existingConfig = await tx.recurringTaskConfig.findUnique({
+        where: { leadId },
       });
+
+      if (existingConfig) {
+        await tx.recurringTaskConfig.update({
+          where: { leadId },
+          data: {
+            interval: data.recurrence.interval,
+            nextDueDate,
+            assignedToId: data.assignedToId,
+            remarks: data.remarks,
+            isActive: true,
+          },
+        });
+      } else {
+        await tx.recurringTaskConfig.create({
+          data: {
+            leadId,
+            interval: data.recurrence.interval,
+            nextDueDate,
+            assignedToId: data.assignedToId,
+            remarks: data.remarks,
+          },
+        });
+      }
     }
 
     return updated;
