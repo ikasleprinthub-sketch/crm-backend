@@ -36,6 +36,17 @@ router.get('/performance',    requireManager, ctrl.getPerformanceStats);
 // ── Audit logs ────────────────────────────────────────────────────────────────
 router.get('/audit-logs', requireAdmin, ctrl.getAuditLogs);
 
+// ── Report Download ───────────────────────────────────────────────────────────
+// Accessible by managers (for their team) and admins (for all).
+// Format: csv (file download) or json (preview data).
+// Examples:
+//   GET /attendance/report/download?periodType=monthly&month=6&year=2026
+//   GET /attendance/report/download?periodType=yearly&year=2026
+//   GET /attendance/report/download?periodType=custom&startDate=2026-01-01&endDate=2026-06-30
+//   GET /attendance/report/download?periodType=monthly&month=6&year=2026&format=json
+//   GET /attendance/report/download?periodType=monthly&month=6&year=2026&userId=<uuid>
+router.get('/report/download', requireAdmin, ctrl.downloadReport);
+
 // ── Admin override + auto-mark ────────────────────────────────────────────────
 router.patch('/:id',      requireAdmin, ctrl.adminOverride);
 router.post('/auto-mark', requireAdmin, ctrl.autoMark);

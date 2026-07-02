@@ -958,3 +958,232 @@ export async function reviewCorrectionRequest(
 
   return updated;
 }
+
+// ── Attendance Report Download ──────────────────────────────────────────────────
+
+export type ReportPeriodType = 'monthly' | 'yearly' | 'custom';
+
+export interface AttendanceReportOptions {
+  periodType: ReportPeriodType;
+  /** For monthly: 1-12 */
+  month?: number;
+  /** For monthly & yearly */
+  year?: number;
+  /** For custom date range (ISO date strings) */
+  startDate?: string;
+  endDate?: string;
+  /** Optional: filter by a specific userId (admin viewing one employee) */
+  userId?: string;
+  /** Role of the requester, used for scoping */
+  requesterRole?: string;
+  requesterId?: string;
+}
+
+function formatTime(dt: Date | null | undefined): string {
+  if (!dt) return '-';
+  return new Date(dt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+}
+
+function formatDate(dt: Date | null | undefined): string {
+  if (!dt) return '-';
+  const d = new Date(dt);
+  return `${String(d.getUTCDate()).padStart(2, '0')}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${d.getUTCFullYear()}`;
+}
+
+export async function getAttendanceReportData(opts: AttendanceReportOptions) {
+  const { periodType, month, year, startDate, endDate, userId, requesterRole, requesterId } = opts;
+  const now = new Date();
+
+  let start: Date;
+  let end: Date;
+  let reportLabel: string;
+
+  if (periodType === 'monthly') {
+    const m = month ?? now.getMonth() + 1;
+    const y = year ?? now.getFullYear();
+    start = new Date(y, m - 1, 1);
+    end = new Date(y, m, 0, 23, 59, 59);
+    reportLabel = `${new Date(y, m - 1).toLocaleString('en-IN', { month: 'long' })} ${y}`;
+  } else if (periodType === 'yearly') {
+    const y = year ?? now.getFullYear();
+    start = new Date(y, 0, 1);
+    end = new Date(y, 11, 31, 23, 59, 59);
+    reportLabel = `Year ${y}`;
+  } else {
+    // custom
+    if (!startDate || !endDate) throw new AppError('startDate and endDate are required for custom range', 400);
+    start = new Date(startDate);
+    end = new Date(endDate);
+    end.setHours(23, 59, 59);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) throw new AppError('Invalid date range', 400);
+    if (start > end) throw new AppError('startDate must be before endDate', 400);
+    reportLabel = `${formatDate(start)} to ${formatDate(end)}`;
+  }
+
+  // Build user scope filter
+  const userWhereConditions: Record<string, unknown> = {
+    role: { not: 'SUPER_ADMIN' as const },
+    status: 'ACTIVE' as const,
+  };
+
+  if (userId) {
+    userWhereConditions.id = userId;
+  } else if (requesterRole === 'MANAGER' && requesterId) {
+    // Managers only see their own team
+    const team = await prisma.user.findMany({
+      where: { managerId: requesterId, status: 'ACTIVE' },
+      select: { id: true },
+    });
+    userWhereConditions.id = { in: [requesterId, ...team.map(t => t.id)] };
+  }
+  // ADMIN / SUPER_ADMIN see all (no further restriction)
+
+  const records = await prisma.attendance.findMany({
+    where: {
+      date: { gte: start, lte: end },
+      user: userWhereConditions,
+    },
+    include: {
+      user: { select: { id: true, name: true, email: true, role: true } },
+    },
+    orderBy: [{ user: { name: 'asc' } }, { date: 'asc' }],
+  });
+
+  // Group by user
+  const byUser = new Map<string, {
+    name: string;
+    email: string;
+    role: string;
+    present: number;
+    absent: number;
+    late: number;
+    halfDay: number;
+    leave: number;
+    sunday: number;
+    notMarked: number;
+    totalHours: number;
+    rows: {
+      date: string;
+      status: string;
+      checkIn: string;
+      checkOut: string;
+      totalHours: string;
+      checkInStatus: string;
+      permission: string;
+      permissionType: string;
+      remarks: string;
+    }[];
+  }>();
+
+  for (const r of records) {
+    if (!r.user) continue;
+    const uid = r.userId;
+
+    if (!byUser.has(uid)) {
+      byUser.set(uid, {
+        name: r.user.name,
+        email: r.user.email,
+        role: r.user.role,
+        present: 0, absent: 0, late: 0, halfDay: 0,
+        leave: 0, sunday: 0, notMarked: 0, totalHours: 0,
+        rows: [],
+      });
+    }
+
+    const stat = byUser.get(uid)!;
+    const isLate = r.status === 'LATE' ||
+      ((r.status === 'PRESENT') && (r.checkInStatus === 'LATE' || r.checkInStatus === 'VERY_LATE'));
+
+    if (r.status === 'PRESENT' && !isLate) stat.present++;
+    else if (isLate) stat.late++;
+    else if (r.status === 'ABSENT') stat.absent++;
+    else if (r.status === 'HALF_DAY') stat.halfDay++;
+    else if (r.status === 'LEAVE') stat.leave++;
+    else if (r.status === 'SUNDAY') stat.sunday++;
+    else if (r.status === 'NOT_MARKED') stat.notMarked++;
+
+    if (r.totalHours) stat.totalHours += r.totalHours;
+
+    stat.rows.push({
+      date: formatDate(r.date),
+      status: r.status,
+      checkIn: formatTime(r.checkIn),
+      checkOut: formatTime(r.checkOut),
+      totalHours: r.totalHours != null ? r.totalHours.toFixed(2) : '-',
+      checkInStatus: r.checkInStatus ?? '-',
+      permission: r.permission,
+      permissionType: r.permissionType ?? '-',
+      remarks: r.remarks ?? '-',
+    });
+  }
+
+  return {
+    reportLabel,
+    periodType,
+    generatedAt: new Date().toISOString(),
+    employees: Array.from(byUser.values()),
+  };
+}
+
+/** Build a CSV buffer synchronously from already-fetched report data */
+export function buildAttendanceCsvFromData(
+  report: Awaited<ReturnType<typeof getAttendanceReportData>>,
+): Buffer {
+  const lines: string[] = [];
+
+  // Header block
+  lines.push(`"Attendance Report","${report.reportLabel}"`);
+  lines.push(`"Generated At","${new Date(report.generatedAt).toLocaleString('en-IN')}"`);
+  lines.push('');
+
+  const colHeaders = [
+    'Employee Name', 'Email', 'Role',
+    'Date', 'Status', 'Check-In', 'Check-Out',
+    'Total Hours', 'Check-In Status', 'Permission', 'Permission Type', 'Remarks',
+  ];
+
+  const summaryHeaders = [
+    'Employee Name', 'Email', 'Role',
+    'Present', 'Late', 'Absent', 'Half Day', 'Leave', 'Sunday', 'Not Marked',
+    'Total Hours Worked',
+  ];
+
+  // ─── SUMMARY SECTION ────────────────────────────────────────────────────────
+  lines.push('"=== SUMMARY ==="');
+  lines.push(summaryHeaders.map(h => `"${h}"`).join(','));
+
+  for (const emp of report.employees) {
+    lines.push([
+      `"${emp.name}"`, `"${emp.email}"`, `"${emp.role}"`,
+      emp.present, emp.late, emp.absent, emp.halfDay,
+      emp.leave, emp.sunday, emp.notMarked,
+      `"${emp.totalHours.toFixed(2)}"`,
+    ].join(','));
+  }
+
+  lines.push('');
+
+  // ─── DETAIL SECTION ─────────────────────────────────────────────────────────
+  lines.push('"=== DETAILED RECORDS ==="');
+  lines.push(colHeaders.map(h => `"${h}"`).join(','));
+
+  for (const emp of report.employees) {
+    for (const row of emp.rows) {
+      lines.push([
+        `"${emp.name}"`, `"${emp.email}"`, `"${emp.role}"`,
+        `"${row.date}"`, `"${row.status}"`, `"${row.checkIn}"`, `"${row.checkOut}"`,
+        `"${row.totalHours}"`, `"${row.checkInStatus}"`,
+        `"${row.permission}"`, `"${row.permissionType}"`, `"${row.remarks}"`,
+      ].join(','));
+    }
+  }
+
+  return Buffer.from(lines.join('\n'), 'utf-8');
+}
+
+/** Build a CSV buffer from options (fetches data internally) */
+export async function buildAttendanceCsv(opts: AttendanceReportOptions): Promise<Buffer> {
+  const report = await getAttendanceReportData(opts);
+  return buildAttendanceCsvFromData(report);
+}
+

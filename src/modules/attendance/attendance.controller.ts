@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response } from 'express';
 import { PermissionType } from '@prisma/client';
 import * as svc from './attendance.service';
+import type { ReportPeriodType } from './attendance.service';
 
 export async function checkIn(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -166,3 +167,52 @@ export async function reviewCorrectionRequest(req: Request, res: Response, next:
     res.json({ success: true, data });
   } catch (e) { next(e); }
 }
+
+/**
+ * GET /attendance/report/download
+ * Query params:
+ *   periodType  = monthly | yearly | custom   (required)
+ *   month       = 1-12                         (required for monthly)
+ *   year        = e.g. 2025                    (required for monthly & yearly)
+ *   startDate   = YYYY-MM-DD                   (required for custom)
+ *   endDate     = YYYY-MM-DD                   (required for custom)
+ *   userId      = <uuid>                       (optional, filter by employee)
+ *   format      = csv | json                   (default: csv)
+ */
+export async function downloadReport(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const periodType = (req.query.periodType as ReportPeriodType) || 'monthly';
+    const format = (req.query.format as string) || 'csv';
+
+    const opts: svc.AttendanceReportOptions = {
+      periodType,
+      month:     req.query.month     ? parseInt(req.query.month as string)  : undefined,
+      year:      req.query.year      ? parseInt(req.query.year  as string)  : undefined,
+      startDate: req.query.startDate as string | undefined,
+      endDate:   req.query.endDate   as string | undefined,
+      userId:    req.query.userId    as string | undefined,
+      requesterRole: req.user!.role,
+      requesterId:   req.user!.id,
+    };
+
+    // Fetch data once
+    const reportData = await svc.getAttendanceReportData(opts);
+
+    if (format === 'json') {
+      res.json({ success: true, data: reportData });
+      return;
+    }
+
+    // Build CSV from already-fetched data
+    const csvBuffer = svc.buildAttendanceCsvFromData(reportData);
+
+    const safeName = reportData.reportLabel.replace(/[^a-zA-Z0-9]/g, '_');
+    const filename = `Attendance_Report_${safeName}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', csvBuffer.length);
+    res.send(csvBuffer);
+  } catch (e) { next(e); }
+}
+

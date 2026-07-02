@@ -5,17 +5,30 @@ import { createNotification } from '../notifications/notifications.service';
 import { getConfig } from '../config/config.service';
 import { emitGlobal } from '../../lib/socket';
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Helpers ────────────────────────────────────────────────────────────────── //
 async function generateLeadNo(): Promise<string> {
+  const latestLead = await prisma.lead.findFirst({
+    where: { leadNo: { startsWith: 'LEAD-' } },
+    orderBy: { leadNo: 'desc' },
+    select: { leadNo: true },
+  });
+
+  if (!latestLead?.leadNo) return 'LEAD-0001';
+
+  const match = latestLead.leadNo.match(/LEAD-(\d+)/);
+  if (match?.[1]) {
+    return `LEAD-${String(parseInt(match[1], 10) + 1).padStart(4, '0')}`;
+  }
+
   const count = await prisma.lead.count();
   return `LEAD-${String(count + 1).padStart(4, '0')}`;
 }
 
 const leadInclude = {
-  source:     { select: { id: true, name: true } },
+  source: { select: { id: true, name: true } },
   department: { select: { id: true, name: true } },
-  taskType:   { select: { id: true, name: true } },
-  tasks:      { select: { id: true, taskNo: true, status: true, priority: true } },
+  taskType: { select: { id: true, name: true } },
+  tasks: { select: { id: true, taskNo: true, status: true, priority: true } },
 } as const;
 
 // ─── GET all leads ────────────────────────────────────────────────────────────
@@ -31,18 +44,18 @@ export async function getAllLeads(opts: {
   const skip = (page - 1) * limit;
 
   const where = {
-    ...(status       ? { status }       : {}),
+    ...(status ? { status } : {}),
     ...(departmentId ? { departmentId } : {}),
-    ...(sourceId     ? { sourceId }     : {}),
+    ...(sourceId ? { sourceId } : {}),
     ...(search
       ? {
-          OR: [
-            { leadName:    { contains: search, mode: 'insensitive' as const } },
-            { contactName: { contains: search, mode: 'insensitive' as const } },
-            { email:       { contains: search, mode: 'insensitive' as const } },
-            { leadNo:      { contains: search, mode: 'insensitive' as const } },
-          ],
-        }
+        OR: [
+          { leadName: { contains: search, mode: 'insensitive' as const } },
+          { contactName: { contains: search, mode: 'insensitive' as const } },
+          { email: { contains: search, mode: 'insensitive' as const } },
+          { leadNo: { contains: search, mode: 'insensitive' as const } },
+        ],
+      }
       : {}),
   };
 
@@ -85,9 +98,9 @@ export async function createLead(data: {
     prisma.department.findUnique({ where: { id: data.departmentId } }),
     prisma.taskType.findUnique({ where: { id: data.taskTypeId } }),
   ]);
-  if (!src)  throw new AppError('Source not found', 404);
+  if (!src) throw new AppError('Source not found', 404);
   if (!dept) throw new AppError('Department not found', 404);
-  if (!tt)   throw new AppError('Task type not found', 404);
+  if (!tt) throw new AppError('Task type not found', 404);
 
   // Email validation
   if (data.email) {
@@ -100,28 +113,40 @@ export async function createLead(data: {
     }
   }
 
-  const leadNo = await generateLeadNo();
-
   const leadDate = data.date ? new Date(data.date) : new Date();
   if (isNaN(leadDate.getTime())) {
     throw new AppError('Invalid date format provided for lead', 400);
   }
 
-  const lead = await prisma.lead.create({
-    data: {
-      leadNo,
-      date:          leadDate,
-      sourceId:      data.sourceId,
-      leadName:      data.leadName,
-      contactName:   data.contactName,
-      contactNumber: data.contactNumber,
-      email:         data.email,
-      departmentId:  data.departmentId,
-      taskTypeId:    data.taskTypeId,
-      remarks:       data.remarks,
-    },
-    include: leadInclude,
-  });
+  let lead;
+  let attempts = 0;
+  while (true) {
+    const leadNo = await generateLeadNo();
+    try {
+      lead = await prisma.lead.create({
+        data: {
+          leadNo,
+          date: leadDate,
+          sourceId: data.sourceId,
+          leadName: data.leadName,
+          contactName: data.contactName,
+          contactNumber: data.contactNumber,
+          email: data.email,
+          departmentId: data.departmentId,
+          taskTypeId: data.taskTypeId,
+          remarks: data.remarks,
+        },
+        include: leadInclude,
+      });
+      break;
+    } catch (err: any) {
+      if (err?.code === 'P2002' && err?.meta?.target?.includes('leadNo') && attempts < 3) {
+        attempts++;
+        continue;
+      }
+      throw err;
+    }
+  }
 
   emitGlobal('lead:updated', { action: 'create', lead });
   return lead;
@@ -193,52 +218,9 @@ export async function convertLeadToTask(
     throw new AppError('Lead is already converted', 400);
   }
 
-  // Validate assignee
-  const assignee = await prisma.user.findUnique({ where: { id: data.assignedToId } });
-  if (!assignee) throw new AppError('Assigned user not found', 404);
-
-  // Generate task number
-  const taskCount = await prisma.task.count();
-  const taskNo = `TASK-${String(taskCount + 1).padStart(4, '0')}`;
-
-  // Fetch SOP template if exists
-  const sopTemplate = await prisma.sOPTemplate.findUnique({
-    where: { taskTypeId: lead.taskTypeId },
-    include: { steps: { orderBy: { order: 'asc' } } },
-  });
-
-  const task = await prisma.$transaction(async (tx) => {
-    // Create task
-    const newTask = await tx.task.create({
-      data: {
-        taskNo,
-        leadId:        leadId,
-        departmentId:  lead.departmentId,
-        taskTypeId:    lead.taskTypeId,
-        contactName:   lead.contactName,
-        contactNumber: lead.contactNumber,
-        email:         lead.email,
-        assignedToId:  data.assignedToId,
-        remarks:       data.remarks ?? lead.remarks,
-        priority:      (data.priority as any) ?? 'REGULAR',
-        startDate:     data.startDate ? (() => {
-          const d = new Date(data.startDate);
-          if (isNaN(d.getTime())) throw new AppError('Invalid start date format', 400);
-          return d;
-        })() : undefined,
-        sopSteps: sopTemplate
-          ? {
-              create: sopTemplate.steps.map((s) => ({
-                title: s.title,
-                order: s.order,
-              })),
-            }
-          : undefined,
-      },
-    });
-
+  const updatedLead = await prisma.$transaction(async (tx) => {
     // Mark lead as CONVERTED
-    await tx.lead.update({
+    const updated = await tx.lead.update({
       where: { id: leadId },
       data: { status: LeadStatus.CONVERTED },
     });
@@ -246,34 +228,24 @@ export async function convertLeadToTask(
     // Log activity
     await tx.activityLog.create({
       data: {
-        userId:  actorId,
-        taskId:  newTask.id,
-        action:  'LEAD_CONVERTED',
-        message: `Lead ${lead.leadNo} converted to task ${taskNo} and assigned to ${assignee.name}`,
+        userId: actorId,
+        action: 'LEAD_CONVERTED',
+        message: `Lead ${lead.leadNo} converted.`,
       },
     });
 
-    // Notify assignee on lead conversion
-    const notifyLeadConverted = (await getConfig('notifyLeadConverted', 'true')) === 'true';
-    if (notifyLeadConverted) {
-      await createNotification({
-        userId:  data.assignedToId,
-        title:   'New Task Assigned',
-        message: `You have been assigned task ${taskNo} for ${lead.leadName}`,
-        type:    'TASK_ASSIGNED',
-        link:    `/tasks/${newTask.id}`,
-      });
-    }
-
     // Create Recurrence Configuration if requested
-    if (data.recurrence) {
+    if (data.recurrence && data.recurrence.interval !== 'NONE' as any) {
       let nextDueDate = new Date();
+      nextDueDate.setHours(0, 0, 0, 0); // Start of day
+
       if (data.recurrence.interval === 'MONTHLY') {
-        nextDueDate.setMonth(nextDueDate.getMonth() + 1);
+        nextDueDate = new Date(nextDueDate.getFullYear(), nextDueDate.getMonth() + 1, 1);
       } else if (data.recurrence.interval === 'QUARTERLY') {
-        nextDueDate.setMonth(nextDueDate.getMonth() + 3);
+        const currentQuarter = Math.floor(nextDueDate.getMonth() / 3);
+        nextDueDate = new Date(nextDueDate.getFullYear(), (currentQuarter + 1) * 3, 1);
       } else if (data.recurrence.interval === 'YEARLY') {
-        nextDueDate.setFullYear(nextDueDate.getFullYear() + 1);
+        nextDueDate = new Date(nextDueDate.getFullYear() + 1, 0, 1);
       } else if (data.recurrence.interval === 'CUSTOM') {
         if (!data.recurrence.nextDueDate) {
           throw new AppError('Custom next due date is required', 400);
@@ -284,23 +256,39 @@ export async function convertLeadToTask(
         }
       }
 
-      await tx.recurringTaskConfig.create({
-        data: {
-          leadId,
-          interval: data.recurrence.interval,
-          nextDueDate,
-          assignedToId: data.assignedToId,
-          remarks: data.remarks,
-        },
+      const existingConfig = await tx.recurringTaskConfig.findUnique({
+        where: { leadId },
       });
+
+      if (existingConfig) {
+        await tx.recurringTaskConfig.update({
+          where: { leadId },
+          data: {
+            interval: data.recurrence.interval,
+            nextDueDate,
+            assignedToId: data.assignedToId,
+            remarks: data.remarks,
+            isActive: true,
+          },
+        });
+      } else {
+        await tx.recurringTaskConfig.create({
+          data: {
+            leadId,
+            interval: data.recurrence.interval,
+            nextDueDate,
+            assignedToId: data.assignedToId,
+            remarks: data.remarks,
+          },
+        });
+      }
     }
 
-    return newTask;
+    return updated;
   });
 
   emitGlobal('lead:updated', { action: 'convert', leadId });
-  emitGlobal('task:updated', { action: 'create', task });
-  return task;
+  return updatedLead;
 }
 
 // ─── BULK IMPORT leads (NEW status) ──────────────────────────────────────────
@@ -356,12 +344,12 @@ export async function bulkImportLeads(
 // ─── DELETE lead ──────────────────────────────────────────────────────────────
 export async function deleteLead(id: string, actorRole: string) {
   console.log(`[LeadsService] deleteLead called for ID: ${id} by Role: ${actorRole}`);
-  
+
   // Strict Permission Check: Only Super Admin and Admin can delete leads
   if (actorRole !== 'SUPER_ADMIN' && actorRole !== 'ADMIN') {
     console.log(`[LeadsService] Blocked: Lead deletion attempt by unauthorized role (${actorRole})`);
     throw new AppError(
-      'Access Denied: You do not have sufficient permissions to delete lead records. This action is restricted to Admins and Super Admins.', 
+      'Access Denied: You do not have sufficient permissions to delete lead records. This action is restricted to Admins and Super Admins.',
       403
     );
   }

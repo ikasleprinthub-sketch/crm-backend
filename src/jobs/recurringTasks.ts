@@ -65,11 +65,12 @@ export async function checkRecurringTasks() {
         let isActive = true;
 
         if (config.interval === RecurrenceInterval.MONTHLY) {
-          nextDueDate.setMonth(nextDueDate.getMonth() + 1);
+          nextDueDate = new Date(nextDueDate.getFullYear(), nextDueDate.getMonth() + 1, 1);
         } else if (config.interval === RecurrenceInterval.QUARTERLY) {
-          nextDueDate.setMonth(nextDueDate.getMonth() + 3);
+          const currentQuarter = Math.floor(nextDueDate.getMonth() / 3);
+          nextDueDate = new Date(nextDueDate.getFullYear(), (currentQuarter + 1) * 3, 1);
         } else if (config.interval === RecurrenceInterval.YEARLY) {
-          nextDueDate.setFullYear(nextDueDate.getFullYear() + 1);
+          nextDueDate = new Date(nextDueDate.getFullYear() + 1, 0, 1);
         } else if (config.interval === RecurrenceInterval.CUSTOM) {
           // Custom recurrence is a one-time future task, so we disable it now
           isActive = false;
