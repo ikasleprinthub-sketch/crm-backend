@@ -47,6 +47,21 @@ export async function applyPermission(req: Request, res: Response, next: NextFun
   } catch (e) { next(e); }
 }
 
+export async function updateMyPermission(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { permissionType, reason, date } = req.body;
+    const data = await svc.updateMyPermission(req.params.id, req.user!.id, { permissionType: permissionType as PermissionType, reason, dateStr: date });
+    res.json({ success: true, data });
+  } catch (e) { next(e); }
+}
+
+export async function deleteMyPermission(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const data = await svc.deleteMyPermission(req.params.id, req.user!.id);
+    res.json({ success: true, data });
+  } catch (e) { next(e); }
+}
+
 export async function getPendingPermissions(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const data = await svc.getPendingPermissions(req.user!.id, req.user!.role);

@@ -239,11 +239,17 @@ export async function applyPermission(
     if (user) {
       const recipients = new Set<string>();
       if (user.managerId) recipients.add(user.managerId);
-      const admins = await prisma.user.findMany({
-        where: { role: { in: ['SUPER_ADMIN', 'ADMIN'] }, status: 'ACTIVE' },
+      
+      const targetRoles = ['SUPER_ADMIN'];
+      if (user.role === 'EMPLOYEE' || user.role === 'MANAGER') {
+        targetRoles.push('ADMIN');
+      }
+      
+      const higherUps = await prisma.user.findMany({
+        where: { role: { in: targetRoles as any }, status: 'ACTIVE' },
         select: { id: true },
       });
-      admins.forEach(a => recipients.add(a.id));
+      higherUps.forEach(a => recipients.add(a.id));
 
       await createNotification({
         userId,
@@ -252,7 +258,7 @@ export async function applyPermission(
           ? `Your request for ${permissionType.replace(/_/g, ' ')} on ${target.toDateString()} has been sent for approval.`
           : `Your request for ${permissionType.replace(/_/g, ' ')} on ${target.toDateString()} has been automatically approved.`,
         type: 'PERMISSION_SENT',
-        link: '/attendance',
+        link: '/permissions',
       });
 
       if (approvalRequired) {
@@ -263,7 +269,7 @@ export async function applyPermission(
             title: 'Approval Required',
             message: `${user.name} has requested a ${permissionType.replace(/_/g, ' ')} for ${target.toDateString()}. Please review and approve.`,
             type: 'PERMISSION_REQUEST',
-            link: '/attendance?tab=permissions',
+            link: '/permissions',
           });
         }
       }
@@ -274,12 +280,68 @@ export async function applyPermission(
   return record;
 }
 
+export async function updateMyPermission(id: string, userId: string, data: { permissionType?: PermissionType, reason?: string, dateStr?: string }) {
+  const existing = await prisma.attendance.findUnique({ where: { id } });
+  if (!existing) throw new AppError('Record not found', 404);
+  if (existing.userId !== userId) throw new AppError('Forbidden', 403);
+  if (existing.permission !== 'PENDING') throw new AppError('Only pending permissions can be edited', 400);
+
+  const updateData: any = {};
+  if (data.permissionType) updateData.permissionType = data.permissionType;
+  if (data.reason) updateData.permissionReason = data.reason;
+
+  if (data.dateStr) {
+    const targetDate = new Date(data.dateStr);
+    targetDate.setUTCHours(0, 0, 0, 0);
+    if (existing.date.getTime() !== targetDate.getTime()) {
+      const conflict = await prisma.attendance.findUnique({
+        where: { userId_date: { userId, date: targetDate } }
+      });
+      if (conflict && (conflict.permission === 'PENDING' || conflict.permission === 'APPROVED')) {
+        throw new AppError('Another attendance/permission record already exists on that date.', 400);
+      }
+      updateData.date = targetDate;
+    }
+  }
+
+  const updated = await prisma.attendance.update({
+    where: { id },
+    data: updateData
+  });
+  
+  emitGlobal('attendance:updated', updated);
+  return updated;
+}
+
+export async function deleteMyPermission(id: string, userId: string) {
+  const existing = await prisma.attendance.findUnique({ where: { id } });
+  if (!existing) throw new AppError('Record not found', 404);
+  if (existing.userId !== userId) throw new AppError('Forbidden', 403);
+  if (existing.permission !== 'PENDING') throw new AppError('Only pending permissions can be deleted', 400);
+
+  const updated = await prisma.attendance.update({
+    where: { id },
+    data: {
+      permission: 'NONE',
+      permissionType: null,
+      permissionReason: null,
+    }
+  });
+
+  emitGlobal('attendance:updated', updated);
+  return updated;
+}
+
 export async function getPendingPermissions(requesterId: string, requesterRole: string) {
+  const baseWhere = {
+    permission: { not: 'NONE' as PermissionStatus }
+  };
+
   if (requesterRole === 'MANAGER') {
     const team = await prisma.user.findMany({ where: { managerId: requesterId, status: 'ACTIVE' } });
     const ids = team.map((m) => m.id);
     return prisma.attendance.findMany({
-      where: { userId: { in: ids }, permission: 'PENDING' },
+      where: { ...baseWhere, userId: { in: ids } },
       include: { user: { select: { id: true, name: true, email: true, role: true } } },
       orderBy: { date: 'desc' },
     });
@@ -287,14 +349,14 @@ export async function getPendingPermissions(requesterId: string, requesterRole: 
 
   if (requesterRole === 'ADMIN') {
     return prisma.attendance.findMany({
-      where: { permission: 'PENDING', user: { role: { in: ['MANAGER', 'EMPLOYEE'] } } },
+      where: { ...baseWhere, user: { role: { in: ['MANAGER', 'EMPLOYEE'] } } },
       include: { user: { select: { id: true, name: true, email: true, role: true } } },
       orderBy: { date: 'desc' },
     });
   }
 
   return prisma.attendance.findMany({
-    where: { permission: 'PENDING' },
+    where: baseWhere,
     include: { user: { select: { id: true, name: true, email: true, role: true } } },
     orderBy: { date: 'desc' },
   });
@@ -342,7 +404,7 @@ export async function approvePermission(id: string, approverId: string) {
       title: 'Permission Approved',
       message: `Your request for ${typeStr} on ${dateStr} has been approved.`,
       type: 'PERMISSION_APPROVED',
-      link: '/attendance',
+      link: '/permissions',
     });
   }
 
@@ -380,7 +442,7 @@ export async function rejectPermission(id: string, approverId: string) {
       title: 'Permission Rejected',
       message: `Your request for ${typeStr} on ${dateStr} has been rejected.`,
       type: 'PERMISSION_REJECTED',
-      link: '/attendance',
+      link: '/permissions',
     });
   }
 
